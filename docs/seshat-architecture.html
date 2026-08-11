@@ -570,12 +570,12 @@ td code, th code { background: none; padding: 0; }
         <text class="tl" x="310" y="336" text-anchor="middle">MCP over HTTP · tools/call</text>
 
         <path class="ln" d="M 864 132 L 974 132"/>
-        <text class="tl" x="919" y="118" text-anchor="middle">chat +</text>
-        <text class="tl" x="919" y="130" text-anchor="middle">embeddings</text>
+        <text class="tl" x="919" y="110" text-anchor="middle">chat +</text>
+        <text class="tl" x="919" y="123" text-anchor="middle">embeddings</text>
 
         <path class="ln" d="M 864 292 L 974 292"/>
-        <text class="tl" x="919" y="278" text-anchor="middle">reads,</text>
-        <text class="tl" x="919" y="290" text-anchor="middle">never writes</text>
+        <text class="tl" x="919" y="270" text-anchor="middle">reads,</text>
+        <text class="tl" x="919" y="283" text-anchor="middle">never writes</text>
       </svg>
     </div>
     <div class="legend">
@@ -721,8 +721,8 @@ td code, th code { background: none; padding: 0; }
 
         <!-- gateway -> library -->
         <path class="ln" d="M 700 420 L 780 420 L 780 485 L 914 485"/>
-        <text class="tl" x="847" y="466" text-anchor="middle">read-only mount</text>
-        <text class="ti" x="847" y="481" text-anchor="middle">scanned every 5 min</text>
+        <text class="tl" x="847" y="457" text-anchor="middle">read-only mount</text>
+        <text class="ti" x="847" y="471" text-anchor="middle">scanned every 5 min</text>
 
         <!-- exposure annotation: the two stores publish nothing -->
         <path class="hair" d="M 340 560 L 372 560"/>
@@ -841,9 +841,12 @@ td code, th code { background: none; padding: 0; }
         <text class="ts" x="72" y="342">+ the MCP JSON-RPC dispatcher</text>
         <path class="ln-f" d="M 156 246 L 156 280"/>
         <text class="tl" x="166" y="266">in-process — no HTTP hop</text>
-        <path class="ln" d="M 308 138 L 308 318 L 292 318"/>
-        <text class="tl" x="316" y="206">MCP</text>
-        <text class="ti" x="316" y="220">tools/call</text>
+        <!-- The MCP bypass rails down the left of Chat: an MCP client enters at
+             Http and reaches Tools without the agent loop. Routed outside the
+             Chat box so it crosses neither the Chat→Gemini arrow nor its label. -->
+        <path class="ln" d="M 80 138 L 80 158 L 40 158 L 40 314 L 50 314"/>
+        <text class="tl" x="48" y="250">MCP</text>
+        <text class="ti" x="48" y="264">tools/call</text>
 
         <!-- Chunker -->
         <rect class="bx" x="676" y="286" width="210" height="64" rx="2"/>
@@ -1240,7 +1243,7 @@ td code, th code { background: none; padding: 0; }
 
         <rect class="bx" x="140" y="358" width="300" height="56" rx="2"/>
         <text class="tn" x="156" y="382">Chunker — the paragraph rule</text>
-        <text class="ts" x="156" y="402">glue &lt; 90 chars forward · split &gt; 3000 on sentences</text>
+        <text class="ts" x="156" y="402">glue &lt; 90 forward · split &gt; 3000 at sentences</text>
 
         <path class="ln-f" d="M 290 414 L 290 438"/>
 
@@ -1258,7 +1261,7 @@ td code, th code { background: none; padding: 0; }
 
         <rect class="bx" x="140" y="604" width="300" height="56" rx="2"/>
         <text class="tn" x="156" y="628">Embed + score</text>
-        <text class="ts" x="156" y="648">Gemini batch of 32, L2 · BM25 tf against avgdl</text>
+        <text class="ts" x="156" y="648">Gemini batch of 32, L2 · BM25 tf ÷ avgdl</text>
 
         <path class="ln-f" d="M 290 660 L 290 684"/>
 
