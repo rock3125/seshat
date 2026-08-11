@@ -1,0 +1,18 @@
+<configuration>
+  <!-- Plain lines on stdout: `docker compose logs` is the reader, and it wants
+       something a human can scan, not JSON. -->
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %-12logger{0} %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- The Qdrant client's gRPC stack and Hikari are chatty at INFO about
+       connection lifecycle events that say nothing about this service. -->
+  <logger name="io.grpc" level="WARN"/>
+  <logger name="com.zaxxer.hikari" level="WARN"/>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

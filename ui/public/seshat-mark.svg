@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Seshat">
+  <!-- The favicon copy of the mark. A file referenced by <link rel="icon"> is
+       rendered outside the page's CSS, so the theme tokens the in-app <Mark>
+       inherits do not resolve here — the two ink colours are written out, and
+       a media query carries the reversal for a dark browser chrome. -->
+  <style>
+    .ink { stroke: #161D20; }
+    @media (prefers-color-scheme: dark) { .ink { stroke: #E6E4DC; } }
+  </style>
+  <g class="ink" fill="none" stroke-width="5.5" stroke-linecap="round">
+    <line x1="64" y1="58" x2="64" y2="36"/>
+    <line x1="70.25" y1="61.01" x2="87.46" y2="47.30"/>
+    <line x1="71.80" y1="67.78" x2="93.25" y2="72.67"/>
+    <line x1="67.47" y1="73.21" x2="77.02" y2="93.03"/>
+    <line x1="60.53" y1="73.21" x2="50.98" y2="93.03"/>
+    <line x1="56.20" y1="67.78" x2="34.75" y2="72.67"/>
+    <line x1="57.74" y1="61.01" x2="40.54" y2="47.30"/>
+  </g>
+  <path d="M 24 34 C 24 -4, 104 -4, 104 34" fill="none" stroke="#A93A26" stroke-width="5.5" stroke-linecap="round"/>
+  <g class="ink" fill="none" stroke-width="5.5" stroke-linecap="round">
+    <line x1="64" y1="98" x2="64" y2="112"/>
+    <line x1="42" y1="116" x2="86" y2="116"/>
+  </g>
+</svg>

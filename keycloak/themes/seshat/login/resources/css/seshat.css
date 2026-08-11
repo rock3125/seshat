@@ -1,0 +1,254 @@
+/* Seshat sign-in — the Se-ber pigment system over keycloak.v2 (PatternFly 5).
+ *
+ * The sign-in page is the first Seshat surface anyone meets, so it wears the
+ * same palette and the same discipline as the app behind it:
+ *
+ *   carbon    #0D1315 ground, #141C1F card      lamp soot, the page
+ *   foam      #E6E4DC                           body text on carbon
+ *   mist      #9AA5A3                           labels and helper text
+ *   rubric    #D2543C                           headings and the submit button
+ *   faience   #57A9B2                           links and focus rings
+ *
+ * THE RUBRIC RULE, which is the whole reason this looks like anything: red is
+ * not decoration. In the medical papyri it marks what BEGINS something and
+ * what must not be misread — the heading of a remedy, the quantity to be
+ * given. Here it takes the page title and the sign-in button, which is the one
+ * thing anybody comes to this page to press. Everything interactive but
+ * secondary — links, focus rings, the border of a focused field — is faience.
+ * If two things were red, neither would be the signal.
+ *
+ * The theme paints DARK unconditionally rather than following the visitor's
+ * preference: this page is one card on an empty ground, seen for four seconds,
+ * and a palette that changes underneath the brand for half the audience buys
+ * nothing.
+ */
+
+:root {
+  /* Re-point PatternFly's primary and link colours at faience — it drives
+     focus rings and links across the whole template without per-element
+     overrides. Faience rather than rubric, deliberately: the red belongs to
+     the heading and the submit button alone. */
+  --pf-v5-global--primary-color--100: #57A9B2;
+  --pf-v5-global--primary-color--200: #7CC2CA;
+  --pf-v5-global--primary-color--dark-100: #57A9B2;
+  --pf-v5-global--link--Color: #57A9B2;
+  --pf-v5-global--link--Color--hover: #7CC2CA;
+  --pf-v5-global--active-color--100: #57A9B2;
+  --pf-v5-global--BackgroundColor--100: #141C1F;
+  --pf-v5-global--Color--100: #E6E4DC;
+  --pf-v5-global--Color--200: #9AA5A3;
+  --pf-v5-global--BorderColor--100: #2B383C;
+  /* keycloak.v2 paints an accent stripe across the top of the card. The
+     identity has no such stripe, and a flat card wants no lid. */
+  --keycloak-card-top-color: transparent;
+
+  --f-display: "Palatino Linotype", "Book Antiqua", Palatino, "Iowan Old Style", Georgia, serif;
+  --f-ui: "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
+  --f-data: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "DejaVu Sans Mono", Consolas, monospace;
+}
+
+/* ---- the ground --------------------------------------------------------- */
+/* Flat, not a gradient. Depth here comes from the tone step between ground and
+   card and from hairline borders — a wash on carbon just reads as murk. */
+body,
+body#keycloak-bg {
+  background: #0D1315 !important;
+  color: #E6E4DC;
+  font-family: var(--f-display);
+}
+
+/* ---- the lockup, pinned top-left ---------------------------------------- */
+/* No plaque, no rounded box: the mark sits directly on the ground, the way the
+   wordmark sits in the app's rail. */
+#kc-header {
+  position: fixed;
+  top: 26px;
+  left: 32px;
+  z-index: 10;
+  padding: 0;
+}
+
+#kc-header-wrapper {
+  width: 210px;
+  height: 64px;                /* the SVG's 420x128 viewBox, same 3.28:1 ratio */
+  padding: 0;
+  overflow: hidden;
+  text-indent: 101%;           /* hide the realm name the template emits */
+  white-space: nowrap;
+  background: url('../img/seshat-logo.svg') left center / contain no-repeat;
+}
+
+/* On a short or narrow screen the fixed corner collides with the card. Put the
+   lockup back in the flow above it instead. */
+@media (max-width: 46rem), (max-height: 40rem) {
+  #kc-header {
+    position: static;
+    padding: 22px 0 6px 20px;
+  }
+  #kc-header-wrapper { width: 178px; height: 54px; }
+}
+
+/* ---- the card ----------------------------------------------------------- */
+.pf-v5-c-login__main {
+  background: #141C1F;
+  border: 1px solid #2B383C;
+  border-radius: 3px;          /* the identity is square-ish; 3px is a hairline */
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+.pf-v5-c-login__main-footer {
+  background: transparent;
+  color: #E6E4DC;
+}
+
+/* ---- the heading takes rubric ------------------------------------------- */
+/* "Sign in" is what begins the transaction, so under the papyrus rule it is
+   the heading, and headings are red. */
+#kc-page-title {
+  font-family: var(--f-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: #D2543C;
+}
+
+/* ---- labels and helper text --------------------------------------------- */
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text,
+.pf-v5-c-form__helper-text,
+.pf-v5-c-check__label,
+#kc-form-options label,
+label {
+  font-family: var(--f-ui) !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: #9AA5A3 !important;
+}
+
+/* ---- inputs: a step darker than the card, quiet until focused ----------- */
+.pf-v5-c-form-control,
+.pf-v5-c-form-control input,
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  background: #0D1315 !important;
+  border: 1px solid #2B383C !important;
+  border-radius: 2px !important;
+  color: #E6E4DC !important;
+  font-family: var(--f-ui) !important;
+  font-size: 0.9375rem !important;
+  box-shadow: none !important;
+}
+
+.pf-v5-c-form-control::after,
+.pf-v5-c-form-control::before { border: 0 !important; }
+
+.pf-v5-c-form-control:focus-within,
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus {
+  border-color: #57A9B2 !important;
+  outline: 1px solid #57A9B2 !important;
+  outline-offset: -1px;
+}
+
+input::placeholder { color: #6E7A79 !important; }
+
+/* Chrome's autofill paints its own near-white background over the field. The
+   inset shadow trick is the only way to repaint it. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #E6E4DC !important;
+  -webkit-box-shadow: 0 0 0 1000px #0D1315 inset !important;
+  caret-color: #E6E4DC;
+}
+
+/* ---- the one red button ------------------------------------------------- */
+.pf-v5-c-button.pf-m-primary,
+input[type="submit"],
+#kc-login {
+  background: #D2543C !important;
+  border: 1px solid #D2543C !important;
+  border-radius: 2px !important;
+  color: #0D1315 !important;
+  font-family: var(--f-ui) !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  padding-block: 0.6rem !important;
+  transition: background 0.16s, border-color 0.16s;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+input[type="submit"]:hover,
+#kc-login:hover {
+  background: #E0664E !important;
+  border-color: #E0664E !important;
+}
+
+/* Anything secondary stays a hairline outline — no second filled button. */
+.pf-v5-c-button.pf-m-secondary,
+.pf-v5-c-button.pf-m-link {
+  background: transparent !important;
+  border-color: #2B383C !important;
+  color: #57A9B2 !important;
+  font-family: var(--f-ui) !important;
+  border-radius: 2px !important;
+}
+
+/* ---- links and the checkbox -------------------------------------------- */
+a, a:visited { color: #57A9B2; text-underline-offset: 0.2em; }
+a:hover { color: #7CC2CA; }
+
+.pf-v5-c-check__input { accent-color: #57A9B2; }
+
+/* ---- alerts: the error is a rubric rule, not a red slab ---------------- */
+.pf-v5-c-alert {
+  background: #1C2528 !important;
+  border: 1px solid #2B383C !important;
+  border-left: 2px solid #D2543C !important;
+  border-radius: 2px !important;
+  color: #E6E4DC !important;
+  font-family: var(--f-ui);
+  font-size: 0.875rem;
+}
+
+.pf-v5-c-alert__title { color: #E6E4DC !important; font-weight: 600; }
+.pf-v5-c-alert__icon { color: #D2543C !important; }
+
+.pf-v5-c-alert.pf-m-success { border-left-color: #57A9B2 !important; }
+.pf-v5-c-alert.pf-m-success .pf-v5-c-alert__icon { color: #57A9B2 !important; }
+
+/* ---- focus ring, globally ---------------------------------------------- */
+:focus-visible {
+  outline: 2px solid #57A9B2;
+  outline-offset: 2px;
+}
+
+/* ---- the colophon ------------------------------------------------------- */
+/* A line of monospace under the card, the way the concept sets its captions.
+   Content in CSS is normally a mistake; here the template has no slot for it
+   and the string is decorative — a screen reader losing it loses nothing.
+
+   Attached to the card unconditionally. An earlier version scoped it with
+   `body:not(.login-pf-page)`, on the assumption that Keycloak marks the
+   sign-in body with that class; it does not in the v2 theme, so the rule
+   matched everything and suppressed the line on every page including the one
+   it was written for. */
+.pf-v5-c-login__main::after {
+  content: "Nothing kept that cannot be cited";
+  display: block;
+  padding: 0 2rem 1.5rem;
+  font-family: var(--f-data);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6E7A79;
+}

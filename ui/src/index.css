@@ -1,0 +1,820 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   SESHAT — the Se-ber pigment system, applied to a chat interface.
+
+   The tokens and the discipline come straight from the identity concept
+   (docs/se-ber.html): five pigments a scribe actually ground, each with one
+   job, and the rubric rule on top of them —
+
+     RUBRIC IS NOT DECORATION. Red marks what BEGINS something and what must
+     not be misread. In a medical papyrus that is the heading of a remedy and
+     the quantity to be given. Here it is: the mark's arc, section headings,
+     citation markers, and retrieval scores. Nothing else takes red. If two
+     things are red, neither is the signal.
+
+     FAIENCE IS INTERACTION. Links, focus rings, the send button, active
+     states. Egyptian blue was the first synthetic pigment; here it is the
+     first thing you click.
+
+     ORPIMENT IS GEOMETRY. Hairlines and measurement only — never type, never
+     a fill.
+
+   Light is the bare :root, so the un-stamped "system" state that most viewers
+   land in always resolves to a complete palette.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --ground:    #E7E8E3;
+  --surface:   #F1F2ED;
+  --surface-2: #DCDED7;
+  --line:      #C5C8C0;
+  --line-soft: #D6D9D1;
+  --ink:       #161D20;
+  --ink-2:     #56605D;
+  --ink-3:     #7C8683;
+
+  --rubric:     #A93A26;
+  --rubric-dim: #C9705E;
+  --faience:    #256F79;
+  --faience-2:  #1B565E;
+  --gold:       #8A6F2E;
+
+  --focus: #256F79;
+
+  --f-display: "Palatino Linotype", "Book Antiqua", Palatino, "Iowan Old Style", Georgia, serif;
+  --f-ui: "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
+  --f-data: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "DejaVu Sans Mono", Consolas, monospace;
+
+  --t-micro: 0.6875rem;
+  --t-label: 0.75rem;
+  --t-small: 0.875rem;
+  --t-body:  1.0625rem;
+  --t-h3:    1.3125rem;
+
+  --measure: 68ch;
+  --rail: 16rem;
+  --drawer: 23rem;
+
+  --radius: 2px;
+  --speed: 0.16s;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:    #0D1315;
+    --surface:   #141C1F;
+    --surface-2: #1C2528;
+    --line:      #2B383C;
+    --line-soft: #212C30;
+    --ink:       #E6E4DC;
+    --ink-2:     #9AA5A3;
+    --ink-3:     #6E7A79;
+
+    --rubric:     #D2543C;
+    --rubric-dim: #8C3C2C;
+    --faience:    #57A9B2;
+    --faience-2:  #7CC2CA;
+    --gold:       #B99B58;
+    --focus:      #57A9B2;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:    #0D1315;
+  --surface:   #141C1F;
+  --surface-2: #1C2528;
+  --line:      #2B383C;
+  --line-soft: #212C30;
+  --ink:       #E6E4DC;
+  --ink-2:     #9AA5A3;
+  --ink-3:     #6E7A79;
+
+  --rubric:     #D2543C;
+  --rubric-dim: #8C3C2C;
+  --faience:    #57A9B2;
+  --faience-2:  #7CC2CA;
+  --gold:       #B99B58;
+  --focus:      #57A9B2;
+}
+
+/* ── base ──────────────────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--f-display);
+  font-size: var(--t-body);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: var(--rubric); color: var(--ground); }
+
+a { color: var(--faience); text-underline-offset: 0.2em; }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 400; text-wrap: balance; }
+p { margin: 0; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+/* Scrollbars: a hairline, not a chrome slab. */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ── shell ─────────────────────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.shell.drawer-open { grid-template-columns: var(--rail) minmax(0, 1fr) var(--drawer); }
+.shell.rail-closed { grid-template-columns: 0 minmax(0, 1fr); }
+.shell.rail-closed.drawer-open { grid-template-columns: 0 minmax(0, 1fr) var(--drawer); }
+
+/* ── the rail (conversations) ──────────────────────────────────────────── */
+
+.rail {
+  background: var(--surface);
+  border-right: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.875rem 0.875rem 0.75rem;
+}
+
+.lockup { display: flex; align-items: center; gap: 0.625rem; min-width: 0; }
+.lockup .glyph { width: 30px; height: 30px; flex: none; color: var(--ink); }
+
+.wordmark {
+  font-family: var(--f-display);
+  font-size: 1.125rem;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wordmark .dot { color: var(--rubric); }
+
+.new-thread {
+  margin: 0 0.75rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--line);
+  transition: border-color var(--speed), color var(--speed);
+}
+
+.new-thread:hover { border-color: var(--faience); color: var(--faience); }
+
+.rail-label {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0.5rem 1rem 0.375rem;
+}
+
+.threads { flex: 1; overflow-y: auto; padding: 0 0.5rem 0.75rem; }
+
+.thread {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4375rem 0.5rem;
+  text-align: left;
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  color: var(--ink-2);
+  border-left: 2px solid transparent;
+  transition: background var(--speed), color var(--speed);
+}
+
+.thread:hover { background: var(--surface-2); color: var(--ink); }
+
+/* The active thread is marked the way a scribe marked an opening: one red
+   stroke in the margin, not a filled block. */
+.thread.active {
+  border-left-color: var(--rubric);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.thread .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread .kill {
+  flex: none;
+  opacity: 0;
+  color: var(--ink-3);
+  padding: 2px;
+  display: grid;
+  place-items: center;
+  transition: opacity var(--speed), color var(--speed);
+}
+
+.thread:hover .kill, .thread .kill:focus-visible { opacity: 1; }
+.thread .kill:hover { color: var(--rubric); }
+
+.rail-foot {
+  border-top: 1px solid var(--line-soft);
+  padding: 0.75rem 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.who {
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.who b { display: block; font-weight: 600; color: var(--ink); }
+.who span { color: var(--ink-3); font-size: var(--t-micro); font-family: var(--f-data); }
+
+.rail-actions { display: flex; gap: 0.375rem; }
+
+.chip {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0.3125rem 0.5rem;
+  border: 1px solid var(--line-soft);
+  transition: color var(--speed), border-color var(--speed);
+}
+
+.chip:hover { color: var(--faience); border-color: var(--faience); }
+
+/* ── the main column ───────────────────────────────────────────────────── */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.625rem 1.25rem;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--ground);
+}
+
+.bar .spacer { flex: 1; }
+
+.bar .eyebrow {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.bar .eyebrow b { color: var(--rubric); font-weight: 400; }
+
+.icon-button {
+  color: var(--ink-3);
+  padding: 0.375rem;
+  display: grid;
+  place-items: center;
+  transition: color var(--speed);
+}
+
+.icon-button:hover { color: var(--faience); }
+.icon-button.on { color: var(--rubric); }
+
+/* ── the transcript ────────────────────────────────────────────────────── */
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem 1.25rem 1rem;
+}
+
+.column { max-width: var(--measure); margin-inline: auto; display: flex; flex-direction: column; gap: 2rem; }
+
+.turn { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+
+@media (max-width: 52rem) {
+  .turn { grid-template-columns: 1fr; gap: 0.5rem; }
+}
+
+/* The gloss column: a scribe's marginalia beside the body of the papyrus. */
+.gloss {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gloss .who-said { color: var(--rubric); letter-spacing: 0.14em; }
+.gloss .rule { height: 1px; background: var(--line); margin-block: 0.15rem; }
+
+.said { min-width: 0; }
+
+/* A question is set as a record entry: bordered, quieter than the answer it
+   provoked. The answer is the thing worth reading. */
+.said.user {
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--line);
+  padding: 0.75rem 1rem;
+  font-size: var(--t-small);
+  font-family: var(--f-ui);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.said.assistant { font-size: var(--t-body); line-height: 1.7; }
+
+/* Prose inside an answer. Markdown output, so every element it can emit needs
+   a rule — an unstyled <table> in the middle of a papyrus is a broken page. */
+.prose > * + * { margin-top: 0.9rem; }
+.prose h1, .prose h2, .prose h3 { font-family: var(--f-display); line-height: 1.25; }
+.prose h1 { font-size: 1.5rem; }
+.prose h2 { font-size: 1.3125rem; }
+.prose h3 {
+  font-family: var(--f-ui);
+  font-size: var(--t-label);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.prose ul, .prose ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.prose li { line-height: 1.6; }
+.prose blockquote {
+  margin: 0;
+  padding-left: 1.125rem;
+  border-left: 2px solid var(--rubric);
+  color: var(--ink);
+}
+.prose code {
+  font-family: var(--f-data);
+  font-size: 0.875em;
+  background: var(--surface-2);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius);
+}
+.prose pre {
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  margin: 0;
+}
+.prose pre code { background: none; padding: 0; font-size: var(--t-small); }
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  display: block;
+  overflow-x: auto;
+}
+.prose th, .prose td { border-bottom: 1px solid var(--line-soft); padding: 0.45rem 0.6rem; text-align: left; }
+.prose th {
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rubric);
+  font-weight: 600;
+}
+.prose td:has(+ td:last-child), .prose td:last-child { font-variant-numeric: tabular-nums; }
+.prose hr { border: 0; border-top: 1px solid var(--line-soft); }
+
+/* The citation marker. Red because it is the thing that must not be misread —
+   the same rule the papyrus applies to a dosage. */
+.cite {
+  font-family: var(--f-data);
+  font-size: 0.6875em;
+  vertical-align: super;
+  /* NOT line-height: 0. A <button> is inline-block, so a zero line-height
+     collapses its box to zero height and the citation becomes literally
+     unclickable — it still LOOKS right, which is why this survived a visual
+     check and was caught by a click. */
+  line-height: 1;
+  color: var(--rubric);
+  padding: 0.15em 0.2em;
+  letter-spacing: 0.04em;
+  border: none;
+  transition: color var(--speed);
+}
+
+.cite:hover { color: var(--ink); text-decoration: underline; }
+.cite.dead { color: var(--ink-3); cursor: default; }
+
+/* ── tool activity ─────────────────────────────────────────────────────── */
+
+.trace { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+
+.trace-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.trace-line .verb { color: var(--faience); text-transform: uppercase; letter-spacing: 0.12em; }
+.trace-line .arg { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-line .count { color: var(--rubric); font-variant-numeric: tabular-nums; }
+.trace-line.bad .verb { color: var(--rubric); }
+
+/* The cursor while the model is still writing. */
+.caret {
+  display: inline-block;
+  width: 0.45em;
+  height: 1.05em;
+  background: var(--rubric);
+  vertical-align: text-bottom;
+  animation: blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes blink { to { visibility: hidden; } }
+
+.failed {
+  border-left: 2px solid var(--rubric);
+  background: var(--surface);
+  padding: 0.75rem 1rem;
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+
+.failed b {
+  display: block;
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rubric);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+/* ── the opening screen ────────────────────────────────────────────────── */
+
+.opening {
+  max-width: var(--measure);
+  margin: clamp(1rem, 7vh, 4.5rem) auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.opening .mark { width: clamp(56px, 8vw, 76px); height: auto; color: var(--ink); }
+
+.opening h1 {
+  font-size: clamp(1.75rem, 1.1rem + 2.4vw, 2.5rem);
+  line-height: 1.2;
+  max-width: 20ch;
+}
+
+.opening h1 em { font-style: normal; color: var(--rubric); }
+
+.opening .standfirst { color: var(--ink-2); max-width: 56ch; }
+
+.openers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.75rem; }
+
+.opener {
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  padding: 0.875rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: border-color var(--speed), transform var(--speed);
+}
+
+.opener:hover { border-color: var(--faience); }
+.opener .tag {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.opener .ask { font-size: var(--t-small); font-family: var(--f-ui); color: var(--ink); line-height: 1.45; }
+
+/* ── the composer ──────────────────────────────────────────────────────── */
+
+.composer-well { padding: 0.75rem 1.25rem 1.25rem; border-top: 1px solid var(--line-soft); background: var(--ground); }
+
+.composer {
+  max-width: var(--measure);
+  margin-inline: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  transition: border-color var(--speed);
+}
+
+.composer:focus-within { border-color: var(--faience); }
+
+.composer textarea {
+  flex: 1;
+  resize: none;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--ink);
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  line-height: 1.55;
+  padding: 0.375rem 0;
+  max-height: 11rem;
+  min-height: 1.55rem;
+}
+
+.composer textarea::placeholder { color: var(--ink-3); }
+
+.send {
+  flex: none;
+  width: 2.125rem;
+  height: 2.125rem;
+  display: grid;
+  place-items: center;
+  background: var(--faience);
+  color: var(--ground);
+  transition: background var(--speed);
+}
+
+.send:hover:not(:disabled) { background: var(--faience-2); }
+.send.stop { background: var(--rubric); }
+
+.composer-note {
+  max-width: var(--measure);
+  margin: 0.4375rem auto 0;
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+/* Each half stays on one line or leaves — a hint that wraps mid-phrase
+   ("Shift+Enter for a new" / "line") is worse than no hint. */
+.composer-note span { white-space: nowrap; }
+.composer-note span:last-child { overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 40rem) {
+  .composer-note span:last-child { display: none; }
+}
+
+/* ── the sources drawer ────────────────────────────────────────────────── */
+
+.drawer {
+  background: var(--surface);
+  border-left: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.drawer-head h2 {
+  flex: 1;
+  font-family: var(--f-ui);
+  font-size: var(--t-label);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rubric);
+}
+
+.drawer-body { flex: 1; overflow-y: auto; padding: 0.75rem 1rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+
+.passage { display: flex; flex-direction: column; gap: 0.4rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
+.passage:last-child { border-bottom: 0; }
+
+.passage .hd { display: flex; align-items: baseline; gap: 0.5rem; }
+
+.passage .id {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  color: var(--rubric);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.passage .doc {
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Retrieval score: a quantity, so it sets in the monospace with tabular
+   figures and it takes rubric — the papyrus rule, applied to a number. */
+.passage .score {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  color: var(--rubric);
+  font-variant-numeric: tabular-nums;
+}
+
+.passage .path {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.passage .body { font-size: var(--t-small); line-height: 1.6; color: var(--ink-2); overflow-wrap: anywhere; }
+
+.passage .body.full { color: var(--ink); white-space: pre-wrap; }
+
+.passage .more {
+  align-self: flex-start;
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faience);
+}
+
+.empty {
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  color: var(--ink-3);
+  line-height: 1.6;
+}
+
+/* ── sign-in / failure screens ─────────────────────────────────────────── */
+
+.screen {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: var(--ground);
+}
+
+.screen .card {
+  max-width: 34rem;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.screen .card .glyph { width: 56px; height: 56px; color: var(--ink); }
+.screen .card h1 { font-size: var(--t-h3); }
+.screen .card p { color: var(--ink-2); font-size: var(--t-small); font-family: var(--f-ui); line-height: 1.6; }
+
+.screen .card .detail {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border-left: 2px solid var(--rubric);
+  padding: 0.625rem 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* ── motion ────────────────────────────────────────────────────────────── */
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes inkdraw { from { stroke-dashoffset: var(--dash); } to { stroke-dashoffset: 0; } }
+
+.opening { animation: rise 0.5s 0.04s both ease-out; }
+.turn { animation: rise 0.35s both ease-out; }
+
+/* The mark draws itself once on the opening screen: seven rays, then the arc,
+   then the cord — the order a scribe would make them. */
+.draw .ray { --dash: 30; stroke-dasharray: 30; animation: inkdraw 0.4s both cubic-bezier(.2,.7,.3,1); }
+.draw .ray:nth-child(1) { animation-delay: 0.16s; }
+.draw .ray:nth-child(2) { animation-delay: 0.21s; }
+.draw .ray:nth-child(3) { animation-delay: 0.26s; }
+.draw .ray:nth-child(4) { animation-delay: 0.31s; }
+.draw .ray:nth-child(5) { animation-delay: 0.36s; }
+.draw .ray:nth-child(6) { animation-delay: 0.41s; }
+.draw .ray:nth-child(7) { animation-delay: 0.46s; }
+.draw .arc { --dash: 120; stroke-dasharray: 120; animation: inkdraw 0.55s 0.5s both cubic-bezier(.2,.7,.3,1); }
+.draw .cord { --dash: 60; stroke-dasharray: 60; animation: inkdraw 0.4s 0.64s both ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ── narrow screens ────────────────────────────────────────────────────── */
+
+@media (max-width: 60rem) {
+  /* The drawer becomes an overlay rather than a third column: at this width a
+     third column leaves the answer — the thing being read — about 30ch wide. */
+  .shell, .shell.drawer-open, .shell.rail-closed, .shell.rail-closed.drawer-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--rail);
+    z-index: 20;
+    transform: translateX(-100%);
+    transition: transform var(--speed) ease-out;
+    box-shadow: 0 0 40px -12px rgba(0, 0, 0, 0.45);
+  }
+  .shell:not(.rail-closed) .rail { transform: none; }
+  .drawer {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(var(--drawer), 92vw);
+    z-index: 20;
+    box-shadow: 0 0 40px -12px rgba(0, 0, 0, 0.45);
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgba(0, 0, 0, 0.35);
+    border: 0;
+  }
+}

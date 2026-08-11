@@ -1,0 +1,186 @@
+# Seshat — the whole stack.
+#
+#   cp .env.example .env      # then set GEMINI_API_KEY
+#   docker compose up -d --build
+#   open http://localhost:8800/seshat/
+#
+# Five services, and the shape is the point:
+#
+#   ui        nginx. The ONLY published port. Serves the SPA and reverse-proxies
+#             the gateway and Keycloak, so the browser sees one origin and an
+#             outer proxy forwards exactly one path (/seshat).
+#   gateway   one Kotlin jar that is both the MCP server and the chat gateway.
+#             Reads the library folder, chunks it, indexes it, searches it, and
+#             streams Gemini's answers over those same tools.
+#   postgres  the chunks, and the document registry the scanner diffs against.
+#   qdrant    the vectors: dense (Gemini embeddings) + sparse (BM25).
+#   keycloak  identity. The gateway verifies its tokens; the UI redirects to it.
+#
+# Postgres and Qdrant publish nothing by default — they are reachable on the
+# compose network and nowhere else. Uncomment their ports for psql or the
+# Qdrant dashboard while developing.
+
+name: seshat
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-seshat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seshat}
+      POSTGRES_DB: ${POSTGRES_DB:-seshat}
+    volumes:
+      # Postgres 18 moved the recommended mount point up one level: the image
+      # now places the cluster in a major-version subdirectory beneath this, so
+      # a future pg_upgrade --link stays inside one mount. Mounting the old
+      # /var/lib/postgresql/data against an 18 image makes it refuse to start.
+      - postgres:/var/lib/postgresql
+    # ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-seshat} -d ${POSTGRES_DB:-seshat}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    volumes:
+      - qdrant:/qdrant/storage
+    # ports: ["6333:6333", "6334:6334"]   # 6333 is the dashboard, 6334 is gRPC
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    # start-dev keeps the dev-mode H2 database and relaxed hostname checks.
+    # For anything public, switch to `start`, give Keycloak its own Postgres
+    # database, and set KC_HOSTNAME to the real https:// URL.
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Keycloak lives one level down from the app, at /seshat/auth, and the
+      # two settings below do DIFFERENT jobs with the same value:
+      #   KC_HTTP_RELATIVE_PATH  where the server routes requests internally
+      #   KC_HOSTNAME            the base of every URL it hands the browser
+      # They do not compose. A KC_HOSTNAME with no path yields an issuer of
+      # http://host/realms/seshat — the prefix missing — and then every token
+      # is rejected by a gateway expecting the prefixed issuer. Keycloak's own
+      # docs say to set both to the same path, and that is why this repeats it.
+      KC_HTTP_RELATIVE_PATH: /seshat/auth
+      KC_HOSTNAME: ${PUBLIC_URL:-http://localhost:8800}/seshat/auth
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      # Off Keycloak's default 8080. Nothing here publishes 8080 to the host,
+      # so this is not a conflict fix — it keeps the port a machine already
+      # running something on 8080 would expect to be free genuinely free, even
+      # if someone later uncomments the direct-access mapping below.
+      KC_HTTP_PORT: "8810"
+      # Trust the X-Forwarded-* headers nginx sets — without this Keycloak
+      # builds its redirect URIs from the container's own address and the
+      # sign-in redirect lands nowhere.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      # `z` is an SELinux relabel, and it is not optional on Fedora/RHEL. With
+      # SELinux enforcing, a bind mount out of a home directory arrives labelled
+      # user_home_t, which no container may read — Keycloak then fails the realm
+      # import with nothing but the file path as the error, and the container
+      # restart-loops. `z` (shared) relabels the source to container_file_t.
+      # It is a no-op on systems without SELinux.
+      - ./keycloak/seshat-realm.json:/opt/keycloak/data/import/seshat-realm.json:ro,z
+      # Themes are mounted, not baked: editing the CSS and restarting Keycloak
+      # is the whole loop.
+      - ./keycloak/themes:/opt/keycloak/themes:ro,z
+    # ports: ["8810:8810"]  # direct access, bypassing the proxy
+    healthcheck:
+      # Keycloak 26 serves /health on the MANAGEMENT port (9000), not the HTTP
+      # port, and only with KC_HEALTH_ENABLED. The image ships no curl or wget,
+      # so this goes through bash's /dev/tcp.
+      #
+      # Two details that each cost an hour if guessed wrong:
+      #   127.0.0.1, not localhost — Keycloak binds 0.0.0.0 (IPv4) and
+      #     `localhost` resolves to ::1 first in this image, which refuses the
+      #     connection and leaves the container permanently "unhealthy" while
+      #     it serves traffic perfectly well.
+      #   the path carries the relative-path prefix — the management interface
+      #     inherits http-relative-path, so health is at
+      #     /seshat/auth/health/ready, not /health/ready (which 404s).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /seshat/auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
+    environment:
+      PORT: 8090
+      DATABASE_URL: postgresql://${POSTGRES_USER:-seshat}:${POSTGRES_PASSWORD:-seshat}@postgres:5432/${POSTGRES_DB:-seshat}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6334
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-seshat}
+
+      LIBRARY_DIR: /library
+      LIBRARY_MIRROR: ${LIBRARY_MIRROR:-on}
+      LIBRARY_SCAN_MINUTES: ${LIBRARY_SCAN_MINUTES:-5}
+
+      # Fixed in .env, as specified — there is no runtime model switch.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
+      EMBED_MODEL: ${EMBED_MODEL:-gemini-embedding-001}
+      EMBED_DIMS: ${EMBED_DIMS:-768}
+
+      # The ISSUER is what Keycloak stamps into a token — the browser-facing
+      # URL. The JWKS URL is where THIS CONTAINER fetches the signing keys, and
+      # it cannot use the public URL (which resolves to itself inside the
+      # network), so it goes direct to the service. They differ on purpose.
+      KEYCLOAK_ISSUER: ${PUBLIC_URL:-http://localhost:8800}/seshat/auth/realms/seshat
+      KEYCLOAK_JWKS_URL: http://keycloak:8810/seshat/auth/realms/seshat/protocol/openid-connect/certs
+      KEYCLOAK_AUDIENCE: seshat-ui
+    volumes:
+      # The library folder. Drop .txt/.md files in and they are indexed within
+      # LIBRARY_SCAN_MINUTES. Read-only: the gateway indexes, it never writes.
+      #
+      # `z` for the same SELinux reason as the Keycloak mounts above — without
+      # it the scanner dies on AccessDeniedException: /library. Note that this
+      # RELABELS the host folder (to container_file_t), so point LIBRARY_DIR at
+      # a directory of documents, not at a system path you would rather leave
+      # labelled as it is.
+      - ${LIBRARY_DIR:-./library}:/library:ro,z
+    # ports: ["8090:8090"]   # direct access for an MCP client or curl
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: ./ui
+      args:
+        VITE_BASE: /seshat/
+        VITE_KEYCLOAK_URL: /seshat/auth
+        VITE_KEYCLOAK_REALM: seshat
+        VITE_KEYCLOAK_CLIENT: seshat-ui
+    depends_on:
+      gateway: { condition: service_started }
+      keycloak: { condition: service_started }
+    ports:
+      # Loopback by default. On a server this stack sits BEHIND nginx, and a
+      # 0.0.0.0 bind would publish it beside nginx as well — reachable on
+      # http://host:8800/seshat/, skipping the TLS termination and anything
+      # else the front proxy does. Set BIND_ADDR=0.0.0.0 to expose it directly
+      # (a laptop with no proxy in front), knowingly.
+      - "${BIND_ADDR:-127.0.0.1}:${SESHAT_PORT:-8800}:80"
+    restart: unless-stopped
+
+volumes:
+  postgres:
+  qdrant:

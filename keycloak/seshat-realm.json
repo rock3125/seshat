@@ -1,0 +1,98 @@
+{
+  "realm": "seshat",
+  "displayName": "Seshat",
+  "enabled": true,
+  "loginTheme": "seshat",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": true,
+  "bruteForceProtected": true,
+
+  "roles": {
+    "realm": [
+      {
+        "name": "default-roles-seshat",
+        "description": "Granted to every user in this realm. Carries use-ui, so a new account can sign in with no extra assignment.",
+        "composite": true,
+        "composites": { "realm": ["use-ui"] },
+        "clientRole": false
+      },
+      { "name": "use-ui", "description": "May sign in to and use the Seshat chat UI" },
+      { "name": "admin", "description": "May re-index the corpus (POST /reindex)" }
+    ]
+  },
+
+  "defaultRole": {
+    "name": "default-roles-seshat",
+    "description": "Default role for realm seshat",
+    "composite": true,
+    "clientRole": false
+  },
+
+  "groups": [
+    { "name": "readers", "path": "/readers", "realmRoles": ["use-ui"] },
+    { "name": "admins", "path": "/admins", "realmRoles": ["use-ui", "admin"] }
+  ],
+
+  "users": [
+    {
+      "username": "peter",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Rock",
+      "lastName": "de Vocht",
+      "email": "peter@peter.co.nz",
+      "credentials": [{ "type": "password", "value": "$DangerMouse", "temporary": false }],
+      "groups": ["/admins"]
+    },
+    {
+      "username": "theta",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Theta",
+      "lastName": "Theta",
+      "email": "theta@peter.co.nz",
+      "credentials": [{ "type": "password", "value": "Theta", "temporary": false }],
+      "groups": ["/readers"]
+    }
+  ],
+
+  "clients": [
+    {
+      "clientId": "seshat-ui",
+      "name": "Seshat chat UI",
+      "description": "Public browser client, Authorization Code + PKCE. See keycloak/README.md.",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8800/seshat/*",
+        "http://127.0.0.1:8800/seshat/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8800/seshat/*##http://127.0.0.1:8800/seshat/*##http://localhost:5173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "seshat-ui",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}
