@@ -1,0 +1,1521 @@
+<title>Seshat — Architecture Diagram</title>
+
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   Tokens, taken verbatim from the project's own ui/src/index.css so this
+   document and the application it describes are the same object.
+
+   Light is the bare :root, so the un-stamped "system" state resolves to a
+   complete palette; dark is redefined twice — once for the OS preference
+   (guarded so an explicit light choice wins) and once for the stamp.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --ground:    #E7E8E3;
+  --surface:   #F1F2ED;
+  --surface-2: #DCDED7;
+  --line:      #C5C8C0;
+  --line-soft: #D6D9D1;
+  --ink:       #161D20;
+  --ink-2:     #56605D;
+  --ink-3:     #7C8683;
+
+  --rubric:     #A93A26;
+  --rubric-dim: #C9705E;
+  --faience:    #256F79;
+  --faience-2:  #1B565E;
+  --gold:       #8A6F2E;
+  --focus:      #256F79;
+
+  --f-display: "Palatino Linotype", "Book Antiqua", Palatino, "Iowan Old Style", Georgia, serif;
+  --f-ui: "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
+  --f-data: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "DejaVu Sans Mono", Consolas, monospace;
+
+  --band: 1160px;
+  --measure: 66ch;
+  --radius: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:    #0D1315;
+    --surface:   #141C1F;
+    --surface-2: #1C2528;
+    --line:      #2B383C;
+    --line-soft: #212C30;
+    --ink:       #E6E4DC;
+    --ink-2:     #9AA5A3;
+    --ink-3:     #6E7A79;
+
+    --rubric:     #D2543C;
+    --rubric-dim: #8C3C2C;
+    --faience:    #57A9B2;
+    --faience-2:  #7CC2CA;
+    --gold:       #B99B58;
+    --focus:      #57A9B2;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:    #0D1315;
+  --surface:   #141C1F;
+  --surface-2: #1C2528;
+  --line:      #2B383C;
+  --line-soft: #212C30;
+  --ink:       #E6E4DC;
+  --ink-2:     #9AA5A3;
+  --ink-3:     #6E7A79;
+
+  --rubric:     #D2543C;
+  --rubric-dim: #8C3C2C;
+  --faience:    #57A9B2;
+  --faience-2:  #7CC2CA;
+  --gold:       #B99B58;
+  --focus:      #57A9B2;
+}
+
+/* ── base ──────────────────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--f-display);
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: var(--rubric); color: var(--ground); }
+
+a { color: var(--faience); text-underline-offset: 0.2em; }
+a:hover { color: var(--faience-2); }
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+h1, h2, h3, h4 { margin: 0; font-weight: 400; text-wrap: balance; }
+p, ul, ol { margin: 0; }
+
+code, kbd {
+  font-family: var(--f-data);
+  font-size: 0.8125em;
+  color: var(--ink);
+  background: var(--surface-2);
+  padding: 0.1em 0.34em;
+  border-radius: var(--radius);
+}
+
+.wrap { max-width: var(--band); margin: 0 auto; padding: 0 28px; }
+.measure { max-width: var(--measure); }
+
+/* ── masthead ──────────────────────────────────────────────────────────── */
+
+.mast { padding: 60px 0 40px; }
+
+.mast-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 26px;
+}
+
+.mark { width: 66px; height: 66px; flex: none; color: var(--ink); }
+
+.mast h1 {
+  font-family: var(--f-display);
+  font-size: clamp(2.1rem, 4.6vw, 3.1rem);
+  line-height: 1.06;
+  letter-spacing: -0.012em;
+}
+
+.mast .sub {
+  font-family: var(--f-ui);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-3);
+  margin-bottom: 0.7rem;
+}
+
+.thesis {
+  font-size: 1.1875rem;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin-top: 1.1rem;
+  max-width: 58ch;
+}
+.thesis b { color: var(--ink); font-weight: 400; }
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 40px;
+  margin-top: 34px;
+  padding-top: 20px;
+  border-top: 1px solid var(--gold);
+}
+
+.fact { padding: 4px 0; }
+.fact .n {
+  display: block;
+  font-family: var(--f-display);
+  font-size: 1.6rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.fact .k {
+  display: block;
+  font-family: var(--f-ui);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+/* ── index bar ─────────────────────────────────────────────────────────── */
+
+.index {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--ground);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-top: 44px;
+}
+.index nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 26px;
+  font-family: var(--f-ui);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  padding: 11px 0;
+}
+.index a { color: var(--ink-2); text-decoration: none; }
+.index a:hover { color: var(--rubric); }
+.index a .num {
+  color: var(--rubric);
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.45em;
+}
+
+/* ── registers ─────────────────────────────────────────────────────────── */
+
+.register {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 0 30px;
+  padding: 66px 0 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.register:first-of-type { border-top: none; }
+
+.rnum {
+  font-family: var(--f-display);
+  font-size: 2.1rem;
+  line-height: 0.9;
+  color: var(--rubric);
+  font-variant-numeric: tabular-nums;
+  padding-top: 4px;
+}
+
+.rhead h2 {
+  font-size: clamp(1.5rem, 2.6vw, 1.95rem);
+  line-height: 1.14;
+  letter-spacing: -0.008em;
+}
+.rhead .eyebrow {
+  font-family: var(--f-ui);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  margin-bottom: 0.5rem;
+}
+.rhead .lede {
+  color: var(--ink-2);
+  margin-top: 0.85rem;
+  max-width: var(--measure);
+}
+
+.body { grid-column: 2; max-width: var(--measure); }
+.body > * + * { margin-top: 1.05rem; }
+
+.body > h3 {
+  font-family: var(--f-ui);
+  font-size: 0.75rem;
+  letter-spacing: 0.13em;
+  color: var(--rubric);
+  margin-top: 2.4rem;
+}
+
+/* ── figures ───────────────────────────────────────────────────────────── */
+
+figure {
+  grid-column: 1 / -1;
+  margin: 40px 0 8px;
+  padding-top: 22px;
+  border-top: 1px solid var(--gold);
+}
+
+.scroll { overflow-x: auto; padding-bottom: 6px; }
+.scroll svg { display: block; width: 100%; height: auto; }
+.scroll.w-md svg { min-width: 820px; }
+.scroll.w-lg svg { min-width: 960px; }
+.scroll.w-tall svg { min-width: 940px; max-width: 1000px; margin: 0 auto; }
+
+figcaption {
+  font-family: var(--f-ui);
+  font-size: 0.8125rem;
+  line-height: 1.62;
+  color: var(--ink-2);
+  max-width: 76ch;
+  margin-top: 20px;
+}
+figcaption b { color: var(--ink); font-weight: 600; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  font-family: var(--f-ui);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  margin-top: 16px;
+}
+.legend span { display: inline-flex; align-items: center; gap: 9px; }
+.legend i { display: block; width: 26px; height: 0; border-top: 2px solid var(--ink-2); }
+.legend .key-f { border-top-color: var(--faience); }
+.legend .key-i { border-top-style: dashed; }
+.legend .key-t { border-top-style: dotted; border-top-color: var(--ink-3); }
+
+/* ── svg element classes ───────────────────────────────────────────────── */
+
+.bx  { fill: var(--surface);   stroke: var(--line); stroke-width: 1; }
+.bx2 { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+.bxo { fill: var(--ground);    stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 5 4; }
+.bnd { fill: none; stroke: var(--gold); stroke-width: 1; stroke-dasharray: 7 6; opacity: 0.65; }
+
+.ln   { fill: none; stroke: var(--ink-2);   stroke-width: 1.4; marker-end: url(#a-ink); }
+.ln-f { fill: none; stroke: var(--faience); stroke-width: 1.7; marker-end: url(#a-fai); }
+.ln-d { fill: none; stroke: var(--ink-2);   stroke-width: 1.3; stroke-dasharray: 5 4; marker-end: url(#a-ink); }
+.ln-t { fill: none; stroke: var(--ink-3);   stroke-width: 1.1; stroke-dasharray: 4 4; marker-end: url(#a-dim); }
+.ln-p { fill: none; stroke: var(--ink-3);   stroke-width: 1; }
+.hair { fill: none; stroke: var(--gold); stroke-width: 1; opacity: 0.8; }
+.life { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
+.xmark { fill: none; stroke: var(--ink-3); stroke-width: 1.5; }
+
+.mk-ink { fill: var(--ink-2); }
+.mk-fai { fill: var(--faience); }
+.mk-dim { fill: var(--ink-3); }
+
+.tt { fill: var(--ink);     font-family: var(--f-ui);   font-size: 13.5px; font-weight: 600; }
+.tn { fill: var(--ink);     font-family: var(--f-ui);   font-size: 12px;   font-weight: 600; }
+.ts { fill: var(--ink-2);   font-family: var(--f-data); font-size: 10.5px; }
+.tl { fill: var(--ink-2);   font-family: var(--f-ui);   font-size: 11.5px; }
+.tf { fill: var(--faience); font-family: var(--f-data); font-size: 10px; }
+.ti { fill: var(--ink-2);   font-family: var(--f-data); font-size: 10px; }
+/* Annotation labels sit beside the gold hairlines but are never set IN gold —
+   orpiment is measurement geometry only, per the identity's own rule. */
+.tg { fill: var(--ink-3);   font-family: var(--f-ui);   font-size: 10.5px; letter-spacing: 0.08em; }
+
+/* ── tables ────────────────────────────────────────────────────────────── */
+
+.tbl { grid-column: 1 / -1; margin-top: 34px; overflow-x: auto; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 620px;
+  font-family: var(--f-ui);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+caption {
+  text-align: left;
+  font-family: var(--f-ui);
+  font-size: 0.6875rem;
+  letter-spacing: 0.13em;
+  color: var(--rubric);
+  padding-bottom: 10px;
+}
+th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.6875rem;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+  padding: 0 14px 8px 0;
+}
+td {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 9px 14px 9px 0;
+  vertical-align: top;
+  color: var(--ink-2);
+}
+td:first-child { color: var(--ink); white-space: nowrap; }
+td code, th code { background: none; padding: 0; }
+.num-col { font-variant-numeric: tabular-nums; }
+
+/* ── notes / closing ───────────────────────────────────────────────────── */
+
+.notes { grid-column: 2; max-width: var(--measure); margin-top: 1.1rem; }
+.notes dl { margin: 0; }
+.notes dt {
+  font-family: var(--f-ui);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 1.3rem;
+}
+.notes dd {
+  margin: 0.25rem 0 0;
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+
+.colophon {
+  border-top: 1px solid var(--gold);
+  margin-top: 70px;
+  padding: 26px 0 70px;
+  font-family: var(--f-ui);
+  font-size: 0.75rem;
+  color: var(--ink-3);
+  line-height: 1.7;
+  max-width: 70ch;
+}
+
+@media (max-width: 880px) {
+  .register { grid-template-columns: 1fr; gap: 0; }
+  .rnum { font-size: 1.4rem; padding-top: 0; margin-bottom: 0.5rem; }
+  .body, .notes { grid-column: 1; }
+  .mast-top { flex-direction: column; gap: 18px; }
+}
+</style>
+
+<!-- Shared arrowheads. Referenced by fragment id from every figure below. -->
+<svg aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path class="mk-ink" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+    <marker id="a-fai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path class="mk-fai" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+    <marker id="a-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path class="mk-dim" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+  </defs>
+</svg>
+
+<header class="mast wrap">
+  <div class="mast-top">
+    <!-- Seshat's emblem, with its arithmetic intact: seven rays at 51.43°
+         under a single red arc, on the cord she stretched to lay out a
+         foundation. Taken from ui/src/components/Mark.tsx. -->
+    <svg class="mark" viewBox="0 0 128 128" role="img" aria-label="The Seshat mark">
+      <g fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round">
+        <line x1="64" y1="58" x2="64" y2="36"/>
+        <line x1="70.25" y1="61.01" x2="87.46" y2="47.30"/>
+        <line x1="71.80" y1="67.78" x2="93.25" y2="72.67"/>
+        <line x1="67.47" y1="73.21" x2="77.02" y2="93.03"/>
+        <line x1="60.53" y1="73.21" x2="50.98" y2="93.03"/>
+        <line x1="56.20" y1="67.78" x2="34.75" y2="72.67"/>
+        <line x1="57.74" y1="61.01" x2="40.54" y2="47.30"/>
+      </g>
+      <path d="M 24 34 C 24 -4, 104 -4, 104 34" fill="none" stroke="var(--rubric)" stroke-width="5.5" stroke-linecap="round"/>
+      <g fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round">
+        <line x1="64" y1="98" x2="64" y2="112"/>
+        <line x1="42" y1="116" x2="86" y2="116"/>
+      </g>
+    </svg>
+
+    <div>
+      <p class="sub">SESHAT · ARCHITECTURE DIAGRAM</p>
+      <h1>Four levels of<br>magnification</h1>
+      <p class="thesis">
+        Ask a private folder of text files, and get answers cited back to the
+        paragraph they came from. <b>Five containers, one published port, two
+        tools defined once and reached two ways.</b> This document draws that
+        shape at four magnifications, then the three runtime paths that make
+        it work.
+      </p>
+    </div>
+  </div>
+
+  <div class="facts">
+    <div class="fact"><span class="n">5</span><span class="k">CONTAINERS</span></div>
+    <div class="fact"><span class="n">1</span><span class="k">PUBLISHED PORT</span></div>
+    <div class="fact"><span class="n">2</span><span class="k">TOOLS</span></div>
+    <div class="fact"><span class="n">2</span><span class="k">POSTGRES TABLES</span></div>
+    <div class="fact"><span class="n">2</span><span class="k">VECTORS PER CHUNK</span></div>
+    <div class="fact"><span class="n">5<span style="font-size:0.6em"> min</span></span><span class="k">INGESTION POLL</span></div>
+  </div>
+</header>
+
+<div class="index">
+  <div class="wrap">
+    <nav>
+      <a href="#context"><span class="num">1</span>System context</a>
+      <a href="#containers"><span class="num">2</span>Containers</a>
+      <a href="#components"><span class="num">3</span>Components</a>
+      <a href="#runtime"><span class="num">4</span>Runtime paths</a>
+      <a href="#reference">Reference</a>
+      <a href="#omissions">What is left out</a>
+    </nav>
+  </div>
+</div>
+
+<main class="wrap">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     LEVEL 1
+     ══════════════════════════════════════════════════════════════════════ -->
+<section class="register" id="context">
+  <div class="rnum">1</div>
+  <div class="rhead">
+    <p class="eyebrow">LEVEL ONE · WIDEST</p>
+    <h2>Who uses it, and what it depends on</h2>
+    <p class="lede">
+      Three kinds of caller, one system, and exactly two things outside it: a
+      folder on the host and Google's API. Nothing else is reached over the
+      network at run time.
+    </p>
+  </div>
+
+  <div class="body">
+    <p>
+      The library folder is the whole corpus, and it is a data source rather
+      than a part of the system — it is mounted read only, the gateway indexes
+      it and never writes to it. Gemini is the only external service: one model
+      answers, another embeds.
+    </p>
+    <p>
+      The third caller matters structurally. An MCP client — Claude Code, an
+      IDE agent — reaches the same two tools the chat interface uses, over
+      <code>POST /mcp</code>, without going near the browser application. It is
+      not an integration bolted on afterwards; it is the same code path.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-md">
+      <svg viewBox="0 0 1180 420" role="img" aria-label="System context: readers, administrators and MCP clients reach Seshat, which depends on a host library folder and the Google Gemini API.">
+
+        <!-- boundary -->
+        <rect class="bnd" x="584" y="54" width="306" height="326" rx="3"/>
+        <text class="tg" x="600" y="76">THE DEPLOYED STACK</text>
+
+        <!-- people -->
+        <rect class="bx" x="20" y="52" width="190" height="72" rx="2"/>
+        <text class="tt" x="36" y="80">Reader</text>
+        <text class="ts" x="36" y="100">realm role: use-ui</text>
+        <text class="ts" x="36" y="114">asks; follows citations</text>
+
+        <rect class="bx" x="20" y="156" width="190" height="72" rx="2"/>
+        <text class="tt" x="36" y="184">Administrator</text>
+        <text class="ts" x="36" y="204">use-ui + admin</text>
+        <text class="ts" x="36" y="218">may rebuild the index</text>
+
+        <rect class="bx" x="20" y="300" width="190" height="88" rx="2"/>
+        <text class="tt" x="36" y="328">MCP client</text>
+        <text class="ts" x="36" y="348">Claude Code, IDE agent</text>
+        <text class="ts" x="36" y="362">handshake is open;</text>
+        <text class="ts" x="36" y="376">tools/call needs a token</text>
+
+        <!-- host proxy -->
+        <rect class="bx2" x="344" y="52" width="150" height="176" rx="2"/>
+        <text class="tt" x="360" y="82">Host nginx</text>
+        <text class="ts" x="360" y="104">outside the stack</text>
+        <text class="ts" x="360" y="120">TLS termination</text>
+        <text class="ts" x="360" y="136">forwards /seshat/</text>
+        <text class="ts" x="360" y="152">and nothing else</text>
+        <text class="ts" x="360" y="176">proxy_buffering</text>
+        <text class="ts" x="360" y="190">off — the answer</text>
+        <text class="ts" x="360" y="204">is a live stream</text>
+
+        <!-- system -->
+        <rect class="bx" x="610" y="104" width="254" height="216" rx="2"/>
+        <text class="tt" x="628" y="140">Seshat</text>
+        <text class="tl" x="628" y="168">Answers questions from a</text>
+        <text class="tl" x="628" y="184">private folder of text files.</text>
+        <text class="tl" x="628" y="208">Every claim is cited to the</text>
+        <text class="tl" x="628" y="224">paragraph it came from, and</text>
+        <text class="tl" x="628" y="240">a question the library does</text>
+        <text class="tl" x="628" y="256">not answer is refused.</text>
+        <text class="ts" x="628" y="292">one origin · one path prefix</text>
+
+        <!-- externals -->
+        <rect class="bxo" x="980" y="90" width="180" height="84" rx="2"/>
+        <text class="tn" x="996" y="116">Google Gemini API</text>
+        <text class="ts" x="996" y="136">gemini-flash-latest</text>
+        <text class="ts" x="996" y="152">gemini-embedding-001</text>
+
+        <rect class="bxo" x="980" y="250" width="180" height="84" rx="2"/>
+        <text class="tn" x="996" y="276">library/</text>
+        <text class="ts" x="996" y="296">a folder on the host</text>
+        <text class="ts" x="996" y="312">.txt .md .csv .json …</text>
+
+        <!-- arrows -->
+        <path class="ln-f" d="M 210 88 L 338 88"/>
+        <text class="tl" x="274" y="80" text-anchor="middle">asks; opens citations</text>
+
+        <path class="ln-f" d="M 210 192 L 338 192"/>
+        <text class="tl" x="274" y="184" text-anchor="middle">same, plus reindex</text>
+
+        <path class="ln-f" d="M 494 170 L 604 170"/>
+        <text class="tl" x="549" y="162" text-anchor="middle">one path only</text>
+
+        <path class="ln-d" d="M 210 344 L 410 344 L 410 255 L 604 255"/>
+        <text class="tl" x="310" y="336" text-anchor="middle">MCP over HTTP · tools/call</text>
+
+        <path class="ln" d="M 864 132 L 974 132"/>
+        <text class="tl" x="919" y="118" text-anchor="middle">chat +</text>
+        <text class="tl" x="919" y="130" text-anchor="middle">embeddings</text>
+
+        <path class="ln" d="M 864 292 L 974 292"/>
+        <text class="tl" x="919" y="278" text-anchor="middle">reads,</text>
+        <text class="tl" x="919" y="290" text-anchor="middle">never writes</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="key-f"></i>through the browser</span>
+      <span><i class="key-i"></i>machine-to-machine (MCP)</span>
+      <span><i class="key-t"></i>outside the system</span>
+    </div>
+    <figcaption>
+      <b>Two callers, one surface.</b> The reader and the MCP client arrive by
+      different routes and reach the same retrieval. The host's nginx is drawn
+      because it is load-bearing: it terminates TLS, forwards a single path,
+      and must not buffer — a buffered answer stream is indistinguishable from
+      a hung server for the ten seconds a real answer takes.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     LEVEL 2
+     ══════════════════════════════════════════════════════════════════════ -->
+<section class="register" id="containers">
+  <div class="rnum">2</div>
+  <div class="rhead">
+    <p class="eyebrow">LEVEL TWO · INSIDE THE SYSTEM</p>
+    <h2>Five containers, one published port</h2>
+    <p class="lede">
+      The exposure is the design. Only <code>ui</code> publishes anything, and
+      it publishes to loopback; Postgres and Qdrant are reachable on the compose
+      network and nowhere else.
+    </p>
+  </div>
+
+  <div class="body">
+    <p>
+      The gateway being one process rather than two is the main structural
+      decision. An MCP server and a chat gateway that calls MCP tools need
+      exactly the same things — the corpus, the vector store, the embedding
+      model, the auth check — so splitting them would mean running two jars to
+      duplicate one set of connections, and adding an HTTP hop between a chat
+      turn and its own retrieval.
+    </p>
+    <p>
+      The two stores split by responsibility rather than by convenience.
+      Postgres holds the only copy of the text; Qdrant holds vectors and ids.
+      Because <code>chunk.id</code> is also the Qdrant point id, one integer
+      names a paragraph in both, and the vector index can be dropped and
+      rebuilt from Postgres alone.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-lg">
+      <svg viewBox="0 0 1180 690" role="img" aria-label="Container diagram: a browser reaches the ui container, which reverse-proxies the gateway and Keycloak; the gateway talks to Postgres, Qdrant, Keycloak, the Gemini API and the mounted library folder.">
+
+        <!-- browser -->
+        <rect class="bxo" x="60" y="24" width="260" height="64" rx="2"/>
+        <text class="tn" x="76" y="50">Browser</text>
+        <text class="ts" x="76" y="70">React · Redux Toolkit · keycloak-js</text>
+
+        <!-- compose boundary -->
+        <rect class="bnd" x="30" y="140" width="830" height="500" rx="3"/>
+        <text class="tg" x="46" y="162">DOCKER COMPOSE PROJECT “SESHAT” · ONE INTERNAL NETWORK</text>
+
+        <!-- ui -->
+        <rect class="bx" x="70" y="182" width="280" height="96" rx="2"/>
+        <text class="tt" x="86" y="208">ui</text>
+        <text class="ts" x="86" y="228">nginx:alpine</text>
+        <text class="ts" x="86" y="244">serves the built SPA and</text>
+        <text class="ts" x="86" y="260">reverse-proxies the other two</text>
+
+        <!-- keycloak -->
+        <rect class="bx" x="520" y="182" width="300" height="96" rx="2"/>
+        <text class="tt" x="536" y="208">keycloak</text>
+        <text class="ts" x="536" y="228">quay.io/keycloak/keycloak:26.3</text>
+        <text class="ts" x="536" y="244">realm “seshat”, imported once</text>
+        <text class="ts" x="536" y="260">:8810 under /seshat/auth</text>
+
+        <!-- gateway -->
+        <rect class="bx" x="180" y="342" width="520" height="112" rx="2"/>
+        <text class="tt" x="196" y="368">gateway</text>
+        <text class="ts" x="196" y="388">one Kotlin fat jar — JDK HttpServer, one virtual thread per request, :8090</text>
+        <text class="ts" x="196" y="406">the MCP server AND the chat gateway, in a single process</text>
+        <text class="ts" x="196" y="424">also runs the library scanner on a timer</text>
+        <text class="ti" x="196" y="444">port not published by default — uncomment it to point an MCP client here</text>
+
+        <!-- stores -->
+        <rect class="bx" x="90" y="512" width="250" height="94" rx="2"/>
+        <text class="tt" x="106" y="538">postgres</text>
+        <text class="ts" x="106" y="558">postgres:18-alpine</text>
+        <text class="ts" x="106" y="574">tables: document, chunk</text>
+        <text class="ts" x="106" y="590">the only copy of the text</text>
+
+        <rect class="bx" x="470" y="512" width="250" height="94" rx="2"/>
+        <text class="tt" x="486" y="538">qdrant</text>
+        <text class="ts" x="486" y="558">qdrant/qdrant:v1.15.1</text>
+        <text class="ts" x="486" y="574">one collection, two vectors</text>
+        <text class="ts" x="486" y="590">point id = chunk.id</text>
+
+        <!-- externals -->
+        <rect class="bxo" x="920" y="300" width="230" height="90" rx="2"/>
+        <text class="tn" x="936" y="326">Google Gemini API</text>
+        <text class="ts" x="936" y="346">streamGenerateContent</text>
+        <text class="ts" x="936" y="362">batchEmbedContents</text>
+
+        <rect class="bxo" x="920" y="440" width="230" height="90" rx="2"/>
+        <text class="tn" x="936" y="466">library/ on the host</text>
+        <text class="ts" x="936" y="486">bind mount, :ro</text>
+        <text class="ts" x="936" y="502">SELinux relabel (z)</text>
+
+        <!-- browser -> ui -->
+        <path class="ln-f" d="M 210 88 L 210 176"/>
+        <text class="tl" x="222" y="112">HTTP · the only published port</text>
+        <text class="ti" x="222" y="128">127.0.0.1:8800 → :80</text>
+
+        <!-- ui -> gateway -->
+        <path class="ln-f" d="M 210 278 L 210 336"/>
+        <text class="tl" x="200" y="300" text-anchor="end">proxy_pass</text>
+        <text class="ti" x="200" y="316" text-anchor="end">gateway:8090</text>
+
+        <!-- ui -> keycloak -->
+        <path class="ln-f" d="M 350 218 L 514 218"/>
+        <text class="tl" x="432" y="204" text-anchor="middle">proxy_pass keycloak:8810</text>
+        <text class="ti" x="432" y="238" text-anchor="middle">path forwarded verbatim</text>
+
+        <!-- gateway -> keycloak (JWKS) -->
+        <path class="ln" d="M 620 342 L 620 284"/>
+        <text class="tl" x="632" y="304">GET the realm JWKS</text>
+        <text class="ti" x="632" y="320">internal URL, direct</text>
+
+        <!-- gateway -> postgres -->
+        <path class="ln-f" d="M 280 454 L 280 506"/>
+        <text class="tl" x="270" y="474" text-anchor="end">JDBC :5432</text>
+        <text class="ti" x="270" y="490" text-anchor="end">HikariCP, max 8</text>
+
+        <!-- gateway -> qdrant -->
+        <path class="ln-f" d="M 600 454 L 600 506"/>
+        <text class="tl" x="612" y="474">gRPC :6334</text>
+        <text class="ti" x="612" y="490">dense + bm25</text>
+
+        <!-- gateway -> gemini -->
+        <path class="ln" d="M 700 372 L 914 372"/>
+        <text class="tl" x="807" y="358" text-anchor="middle">HTTPS — stream answers, embed text</text>
+
+        <!-- gateway -> library -->
+        <path class="ln" d="M 700 420 L 780 420 L 780 485 L 914 485"/>
+        <text class="tl" x="847" y="466" text-anchor="middle">read-only mount</text>
+        <text class="ti" x="847" y="481" text-anchor="middle">scanned every 5 min</text>
+
+        <!-- exposure annotation: the two stores publish nothing -->
+        <path class="hair" d="M 340 560 L 372 560"/>
+        <path class="hair" d="M 470 560 L 438 560"/>
+        <text class="tg" x="405" y="546" text-anchor="middle">NO</text>
+        <text class="tg" x="405" y="580" text-anchor="middle">PUBLISHED</text>
+        <text class="tg" x="405" y="594" text-anchor="middle">PORTS</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="key-f"></i>browser-facing request path</span>
+      <span><i class="key-i"></i>server-to-server</span>
+      <span><i class="key-t"></i>outside the compose network</span>
+    </div>
+    <figcaption>
+      <b>Everything the browser touches is one origin under one prefix.</b>
+      <code>/seshat/</code> is the SPA, <code>/seshat/api/</code> the gateway,
+      <code>/seshat/auth/</code> Keycloak — which is what makes the application
+      same-origin in development and production alike, and what lets an outer
+      proxy forward exactly one path. The bind on the published port is
+      <code>127.0.0.1</code> by default, so on a server the stack cannot be
+      reached beside nginx, skipping TLS.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     LEVEL 3
+     ══════════════════════════════════════════════════════════════════════ -->
+<section class="register" id="components">
+  <div class="rnum">3</div>
+  <div class="rhead">
+    <p class="eyebrow">LEVEL THREE · INSIDE THE CONTAINERS</p>
+    <h2>One definition, two callers</h2>
+    <p class="lede">
+      The gateway's fourteen Kotlin files arrange into two paths that meet at a
+      shared foundation: answering a question, and indexing a file. Both reach
+      the same four components, and ask them opposite things.
+    </p>
+  </div>
+
+  <div class="body">
+    <p>
+      <code>Tools.kt</code> holds the two tools and the MCP JSON-RPC
+      dispatcher over them. The chat agent calls <code>Tools.call</code>
+      in-process, with no HTTP hop; an MCP client reaches the identical
+      function through <code>Http.kt</code>. There is no second implementation
+      to drift, so the model answering in the web interface and the model in
+      someone's editor see the same tool descriptions and get the same results.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-md">
+      <svg viewBox="0 0 940 640" role="img" aria-label="Component diagram of the gateway: Http routes to Chat and Tools and the Library scanner; Chat drives the Gemini client; both Tools and Library rest on Embeddings, Bm25, Store and Db.">
+
+        <rect class="bnd" x="24" y="44" width="880" height="470" rx="3"/>
+        <text class="tg" x="600" y="66">GATEWAY · ONE FAT JAR, ONE PROCESS</text>
+
+        <!-- entry labels -->
+        <text class="ti" x="110" y="26" text-anchor="middle">POST /chat</text>
+        <text class="ti" x="220" y="26" text-anchor="middle">POST /mcp</text>
+        <text class="ti" x="330" y="26" text-anchor="middle">GET /chunk/N</text>
+        <text class="ti" x="440" y="26" text-anchor="middle">GET /config</text>
+        <text class="ti" x="545" y="26" text-anchor="middle">POST /reindex</text>
+        <path class="ln" d="M 110 32 L 110 76"/>
+        <path class="ln" d="M 220 32 L 220 76"/>
+        <path class="ln" d="M 330 32 L 330 76"/>
+        <path class="ln" d="M 440 32 L 440 76"/>
+        <path class="ln" d="M 545 32 L 545 76"/>
+
+        <!-- Http -->
+        <rect class="bx" x="56" y="78" width="520" height="60" rx="2"/>
+        <text class="tt" x="72" y="102">Http.kt</text>
+        <text class="ts" x="72" y="120">JDK HttpServer · one virtual thread per request · SSE writer</text>
+        <text class="ts" x="72" y="134">CORS · readiness probe · a 401 before anything else runs</text>
+
+        <!-- Auth -->
+        <rect class="bx" x="676" y="78" width="210" height="60" rx="2"/>
+        <text class="tt" x="692" y="102">Auth.kt</text>
+        <text class="ts" x="692" y="120">RS256 · JWKS cache</text>
+        <text class="ts" x="692" y="134">iss · aud · exp · roles</text>
+        <path class="ln" d="M 576 106 L 670 106"/>
+        <text class="tl" x="623" y="98" text-anchor="middle">verify</text>
+
+        <!-- Chat -->
+        <rect class="bx" x="56" y="182" width="200" height="64" rx="2"/>
+        <text class="tt" x="72" y="206">Chat.kt</text>
+        <text class="ts" x="72" y="224">the agent loop</text>
+        <text class="ts" x="72" y="238">MAX_TOOL_ROUNDS = 8</text>
+        <path class="ln-f" d="M 120 138 L 120 176"/>
+        <text class="tl" x="130" y="154">chat turn</text>
+        <text class="ti" x="130" y="168">over SSE</text>
+
+        <!-- Gemini -->
+        <rect class="bx" x="380" y="182" width="170" height="64" rx="2"/>
+        <text class="tt" x="396" y="204">Gemini.kt</text>
+        <text class="ts" x="396" y="222">returns text + calls</text>
+        <text class="ts" x="396" y="236">thought signatures</text>
+        <path class="ln-f" d="M 256 214 L 374 214"/>
+        <text class="tl" x="315" y="206" text-anchor="middle">stream a turn</text>
+
+        <!-- Library -->
+        <rect class="bx" x="676" y="182" width="210" height="64" rx="2"/>
+        <text class="tt" x="692" y="206">Library.kt</text>
+        <text class="ts" x="692" y="224">scan on boot, then</text>
+        <text class="ts" x="692" y="238">every 5 min · sha-256</text>
+        <path class="ln" d="M 760 138 L 760 176"/>
+        <text class="tl" x="770" y="154">POST</text>
+        <text class="ti" x="770" y="168">/reindex</text>
+
+        <!-- Tools -->
+        <rect class="bx2" x="56" y="286" width="230" height="64" rx="2"/>
+        <text class="tt" x="72" y="310">Tools.kt</text>
+        <text class="ts" x="72" y="328">search · load_chunk</text>
+        <text class="ts" x="72" y="342">+ the MCP JSON-RPC dispatcher</text>
+        <path class="ln-f" d="M 156 246 L 156 280"/>
+        <text class="tl" x="166" y="266">in-process — no HTTP hop</text>
+        <path class="ln" d="M 308 138 L 308 318 L 292 318"/>
+        <text class="tl" x="316" y="206">MCP</text>
+        <text class="ti" x="316" y="220">tools/call</text>
+
+        <!-- Chunker -->
+        <rect class="bx" x="676" y="286" width="210" height="64" rx="2"/>
+        <text class="tt" x="692" y="310">Chunker.kt</text>
+        <text class="ts" x="692" y="328">paragraph rule, glue &lt; 90,</text>
+        <text class="ts" x="692" y="342">split &gt; 3000 on sentences</text>
+        <path class="ln-d" d="M 760 246 L 760 280"/>
+        <text class="ti" x="770" y="268">decoded text</text>
+
+        <!-- spines -->
+        <path class="ln-p" style="stroke:var(--faience);stroke-width:1.7" d="M 156 350 L 156 366 M 105 366 L 715 366"/>
+        <path class="ln-f" d="M 105 366 L 105 402"/>
+        <path class="ln-f" d="M 315 366 L 315 402"/>
+        <path class="ln-f" d="M 500 366 L 500 402"/>
+        <path class="ln-f" d="M 715 366 L 715 402"/>
+
+        <path class="ln-p" style="stroke-dasharray:5 4;stroke:var(--ink-2);stroke-width:1.3" d="M 886 200 L 896 200 L 896 384 L 170 384"/>
+        <path class="ln-d" d="M 170 384 L 170 402"/>
+        <path class="ln-d" d="M 380 384 L 380 402"/>
+        <path class="ln-d" d="M 570 384 L 570 402"/>
+        <path class="ln-d" d="M 780 384 L 780 402"/>
+
+        <!-- foundation -->
+        <rect class="bx" x="40" y="404" width="196" height="76" rx="2"/>
+        <text class="tn" x="54" y="426">Embeddings.kt</text>
+        <text class="tf" x="54" y="448">ask: RETRIEVAL_QUERY</text>
+        <text class="ti" x="54" y="466">index: RETRIEVAL_DOCUMENT</text>
+
+        <rect class="bx" x="258" y="404" width="170" height="76" rx="2"/>
+        <text class="tn" x="272" y="426">Bm25.kt</text>
+        <text class="tf" x="272" y="448">ask: presence only</text>
+        <text class="ti" x="272" y="466">index: tf × len norm</text>
+
+        <rect class="bx" x="446" y="404" width="180" height="76" rx="2"/>
+        <text class="tn" x="460" y="426">Store.kt</text>
+        <text class="tf" x="460" y="448">ask: 2 prefetch, RRF</text>
+        <text class="ti" x="460" y="466">index: upsert, batch 256</text>
+
+        <rect class="bx" x="650" y="404" width="196" height="76" rx="2"/>
+        <text class="tn" x="664" y="426">Db.kt</text>
+        <text class="tf" x="664" y="448">ask: chunk text by id</text>
+        <text class="ti" x="664" y="466">index: replace doc, one tx</text>
+
+        <text class="tg" x="180" y="502">CONFIG.KT — EVERY KNOB READ ONCE AT BOOT</text>
+
+        <!-- externals -->
+        <rect class="bxo" x="40" y="556" width="196" height="52" rx="2"/>
+        <text class="tn" x="54" y="578">Gemini API</text>
+        <text class="ts" x="54" y="596">batch of 32, L2-normalised</text>
+        <path class="ln" d="M 138 480 L 138 550"/>
+
+        <rect class="bxo" x="446" y="556" width="180" height="52" rx="2"/>
+        <text class="tn" x="460" y="578">Qdrant</text>
+        <text class="ts" x="460" y="596">gRPC, one collection</text>
+        <path class="ln" d="M 536 480 L 536 550"/>
+
+        <rect class="bxo" x="650" y="556" width="196" height="52" rx="2"/>
+        <text class="tn" x="664" y="578">Postgres</text>
+        <text class="ts" x="664" y="596">document · chunk</text>
+        <path class="ln" d="M 748 480 L 748 550"/>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="key-f"></i>answering a question</span>
+      <span><i class="key-i"></i>indexing a file</span>
+    </div>
+    <figcaption>
+      <b>Both paths land on the same four components and ask them opposite
+      things.</b> A query is embedded as <code>RETRIEVAL_QUERY</code> and a
+      document as <code>RETRIEVAL_DOCUMENT</code>, because a retrieval model
+      puts the two in deliberately different places in the space. BM25 splits
+      across the two ends: the stored vector carries term frequency and length
+      normalisation, the query vector carries only presence, and inverse
+      document frequency comes from Qdrant live — which is what keeps the index
+      honest as documents arrive. <code>Bm25.kt</code> is the one component
+      with no external dependency at all; it is arithmetic.
+    </figcaption>
+  </figure>
+
+  <div class="body">
+    <h3>THE BROWSER SIDE</h3>
+    <p>
+      The single-page application holds something the server deliberately does
+      not: the conversation. Postgres stores chunks, per the brief — which has
+      the side effect that a question is never written to a disk the person
+      asking it does not own. The cost is that a thread does not follow you to
+      another machine, and signing out clears it.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-md">
+      <svg viewBox="0 0 930 430" role="img" aria-label="Component diagram of the single-page application: authentication resolves before the first render, a question flows out through chatStream, and the answer returns as SSE events reduced into a Redux slice that persists to localStorage.">
+
+        <!-- row 1 : boot -->
+        <text class="tg" x="30" y="26">BOOT — BEFORE THE FIRST RENDER</text>
+        <rect class="bx" x="30" y="40" width="210" height="62" rx="2"/>
+        <text class="tn" x="44" y="64">main.tsx</text>
+        <text class="ts" x="44" y="84">awaits initAuth()</text>
+
+        <rect class="bx" x="360" y="40" width="210" height="62" rx="2"/>
+        <text class="tn" x="374" y="64">auth/keycloak.ts</text>
+        <text class="ts" x="374" y="84">public client, no secret</text>
+
+        <rect class="bxo" x="680" y="40" width="210" height="62" rx="2"/>
+        <text class="tn" x="694" y="64">Keycloak realm</text>
+        <text class="ts" x="694" y="84">hosted login page</text>
+
+        <path class="ln-f" d="M 240 71 L 354 71"/>
+        <text class="tl" x="297" y="63" text-anchor="middle">blocks render</text>
+        <path class="ln-f" d="M 570 71 L 674 71"/>
+        <text class="tl" x="622" y="55" text-anchor="middle">Auth Code</text>
+        <text class="tl" x="622" y="67" text-anchor="middle">+ PKCE</text>
+
+        <!-- row 2 : the question -->
+        <text class="tg" x="30" y="158">A QUESTION, GOING OUT</text>
+        <rect class="bx" x="30" y="172" width="210" height="62" rx="2"/>
+        <text class="tn" x="44" y="196">App.tsx · Composer</text>
+        <text class="ts" x="44" y="216">Rail · Transcript · Sources</text>
+
+        <rect class="bx" x="360" y="172" width="210" height="62" rx="2"/>
+        <text class="tn" x="374" y="196">chatStream.ts</text>
+        <text class="ts" x="374" y="216">fetch + stream reader</text>
+
+        <rect class="bxo" x="680" y="172" width="210" height="62" rx="2"/>
+        <text class="tn" x="694" y="196">gateway</text>
+        <text class="ts" x="694" y="216">POST /seshat/api/chat</text>
+
+        <path class="ln-f" d="M 240 203 L 354 203"/>
+        <text class="tl" x="297" y="187" text-anchor="middle">prompt +</text>
+        <text class="tl" x="297" y="199" text-anchor="middle">last 20 turns</text>
+        <path class="ln-f" d="M 570 203 L 674 203"/>
+        <text class="tl" x="622" y="187" text-anchor="middle">POST, with</text>
+        <text class="tl" x="622" y="199" text-anchor="middle">a fresh token</text>
+
+        <path class="ln-d" d="M 465 102 L 465 166"/>
+        <text class="tl" x="475" y="128">Bearer on</text>
+        <text class="ti" x="475" y="142">every call</text>
+
+        <!-- row 3 : the answer -->
+        <text class="tg" x="30" y="290">THE ANSWER, COMING BACK</text>
+        <rect class="bxo" x="30" y="304" width="210" height="62" rx="2"/>
+        <text class="tn" x="44" y="328">localStorage</text>
+        <text class="ts" x="44" y="348">key: seshat-state</text>
+
+        <rect class="bx2" x="360" y="304" width="210" height="62" rx="2"/>
+        <text class="tn" x="374" y="328">conversationsSlice</text>
+        <text class="ts" x="374" y="348">the only transcript store</text>
+
+        <rect class="bx" x="680" y="304" width="210" height="62" rx="2"/>
+        <text class="tn" x="694" y="328">SSE events</text>
+        <text class="ts" x="694" y="348">token · tool_call · done</text>
+
+        <path class="ln-f" d="M 785 234 L 785 298"/>
+        <text class="tl" x="775" y="258" text-anchor="end">text/event-stream</text>
+        <text class="ti" x="775" y="272" text-anchor="end">read as it arrives</text>
+
+        <path class="ln-f" d="M 680 335 L 576 335"/>
+        <text class="tl" x="628" y="319" text-anchor="middle">reduced into</text>
+        <text class="tl" x="628" y="331" text-anchor="middle">the thread</text>
+
+        <path class="ln-f" d="M 360 335 L 246 335"/>
+        <text class="tl" x="303" y="319" text-anchor="middle">persisted on</text>
+        <text class="tl" x="303" y="331" text-anchor="middle">every change</text>
+
+        <path class="ln-f" d="M 400 304 L 400 264 L 135 264 L 135 240"/>
+        <text class="tl" x="270" y="256" text-anchor="middle">re-renders the transcript and the sources panel</text>
+
+        <path class="hair" d="M 30 386 L 890 386"/>
+        <text class="tg" x="30" y="406">SIGN OUT CLEARS THE KEY — ON A SHARED MACHINE THE NEXT PERSON READS NOTHING</text>
+      </svg>
+    </div>
+    <figcaption>
+      <b>The browser owns the history, so it sends the window it wants
+      replayed.</b> Twenty prior messages travel with each question, as plain
+      text turns without the tool traffic that produced them — the model needs
+      what was said, and replaying tool calls would mean replaying thought
+      signatures that are only valid inside the request that produced them.
+      The stream is read with <code>fetch</code> and a stream reader rather
+      than <code>EventSource</code>, which is GET-only and reconnects by
+      itself; this needs a POST body and a turn that ends when it ends.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     LEVEL 4
+     ══════════════════════════════════════════════════════════════════════ -->
+<section class="register" id="runtime">
+  <div class="rnum">4</div>
+  <div class="rhead">
+    <p class="eyebrow">LEVEL FOUR · WHAT ACTUALLY HAPPENS</p>
+    <h2>Three paths through the parts</h2>
+    <p class="lede">
+      A question being answered, a file being indexed, and the one piece of
+      configuration that silently rejects every token when it is wrong.
+    </p>
+  </div>
+
+  <div class="body">
+    <h3>PATH ONE · A CHAT TURN</h3>
+    <p>
+      One request, held open for as long as the model takes. Everything is
+      surfaced as it happens, so the interface can show what was retrieved even
+      when the model cites none of it.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-lg">
+      <svg viewBox="0 0 1100 745" role="img" aria-label="Sequence of one chat turn: the browser posts a prompt, the gateway verifies the token, the chat loop streams a Gemini turn, runs the search tool in-process against Qdrant and Postgres, feeds results back, and streams the cited answer.">
+
+        <!-- headers -->
+        <rect class="bx2" x="15" y="30" width="150" height="46" rx="2"/>
+        <text class="tn" x="90" y="52" text-anchor="middle">Browser</text>
+        <text class="ts" x="90" y="68" text-anchor="middle">SPA</text>
+
+        <rect class="bx2" x="205" y="30" width="150" height="46" rx="2"/>
+        <text class="tn" x="280" y="52" text-anchor="middle">Http.kt</text>
+        <text class="ts" x="280" y="68" text-anchor="middle">gateway</text>
+
+        <rect class="bx2" x="395" y="30" width="150" height="46" rx="2"/>
+        <text class="tn" x="470" y="52" text-anchor="middle">Chat.kt</text>
+        <text class="ts" x="470" y="68" text-anchor="middle">agent loop</text>
+
+        <rect class="bx2" x="585" y="30" width="150" height="46" rx="2"/>
+        <text class="tn" x="660" y="52" text-anchor="middle">Gemini API</text>
+        <text class="ts" x="660" y="68" text-anchor="middle">external</text>
+
+        <rect class="bx2" x="775" y="30" width="150" height="46" rx="2"/>
+        <text class="tn" x="850" y="52" text-anchor="middle">Tools.kt</text>
+        <text class="ts" x="850" y="68" text-anchor="middle">search</text>
+
+        <rect class="bx2" x="935" y="30" width="160" height="46" rx="2"/>
+        <text class="tn" x="1015" y="52" text-anchor="middle">Qdrant · Postgres</text>
+        <text class="ts" x="1015" y="68" text-anchor="middle">the two stores</text>
+
+        <!-- lifelines -->
+        <path class="life" d="M 90 76 L 90 720"/>
+        <path class="life" d="M 280 76 L 280 720"/>
+        <path class="life" d="M 470 76 L 470 720"/>
+        <path class="life" d="M 660 76 L 660 720"/>
+        <path class="life" d="M 850 76 L 850 720"/>
+        <path class="life" d="M 1015 76 L 1015 720"/>
+
+        <!-- 1 -->
+        <text class="tl" x="185" y="102" text-anchor="middle">POST /chat  {prompt, history ≤ 20}</text>
+        <text class="ti" x="185" y="115" text-anchor="middle">Authorization: Bearer …  ·  via nginx, unbuffered</text>
+        <path class="ln-f" d="M 90 122 L 274 122"/>
+
+        <!-- 2 self -->
+        <path class="ln" d="M 280 146 L 330 146 L 330 166 L 286 166"/>
+        <text class="tl" x="338" y="150">Auth.verify — RS256, iss,</text>
+        <text class="ti" x="338" y="164">aud, exp, role use-ui</text>
+
+        <!-- 3 -->
+        <text class="tl" x="375" y="190" text-anchor="middle">run(prompt, history, sse)</text>
+        <path class="ln-f" d="M 280 196 L 464 196"/>
+
+        <!-- loop bracket -->
+        <rect class="bnd" x="40" y="214" width="1040" height="424" rx="3"/>
+        <text class="tg" x="54" y="234">LOOP — UNTIL THE MODEL ANSWERS WITHOUT ASKING FOR A TOOL · AT MOST 8 ROUNDS</text>
+
+        <!-- 4 -->
+        <text class="tl" x="565" y="252" text-anchor="middle">streamGenerateContent?alt=sse</text>
+        <text class="ti" x="565" y="265" text-anchor="middle">+ the two tool declarations</text>
+        <path class="ln-f" d="M 470 272 L 654 272"/>
+
+        <!-- 5 -->
+        <text class="ti" x="565" y="294" text-anchor="middle">text deltas</text>
+        <path class="ln-d" d="M 660 300 L 476 300"/>
+
+        <!-- 6 -->
+        <text class="ti" x="280" y="322" text-anchor="middle">event: token</text>
+        <path class="ln-d" d="M 470 328 L 96 328"/>
+
+        <!-- 7 -->
+        <text class="ti" x="565" y="348" text-anchor="middle">functionCall</text>
+        <text class="ti" x="565" y="361" text-anchor="middle">search{query, mode}</text>
+        <path class="ln-d" d="M 660 368 L 476 368"/>
+
+        <!-- 8 -->
+        <text class="ti" x="280" y="390" text-anchor="middle">event: tool_call</text>
+        <path class="ln-d" d="M 470 396 L 96 396"/>
+
+        <!-- 9 -->
+        <text class="tl" x="660" y="418" text-anchor="middle">call(name, args) — in-process, no HTTP hop</text>
+        <path class="ln-f" d="M 470 424 L 844 424"/>
+
+        <!-- 10 -->
+        <text class="ti" x="755" y="446" text-anchor="middle">embed the query (RETRIEVAL_QUERY)</text>
+        <path class="ln" d="M 850 452 L 666 452"/>
+
+        <!-- 11 -->
+        <text class="ti" x="932" y="474" text-anchor="middle">Qdrant — dense + sparse</text>
+        <text class="ti" x="932" y="487" text-anchor="middle">prefetch, fused by RRF</text>
+        <path class="ln-f" d="M 850 494 L 1009 494"/>
+
+        <!-- 12 -->
+        <text class="ti" x="932" y="516" text-anchor="middle">Postgres — chunk text</text>
+        <text class="ti" x="932" y="529" text-anchor="middle">by id, in hit order</text>
+        <path class="ln-f" d="M 850 536 L 1009 536"/>
+
+        <!-- 13 -->
+        <text class="ti" x="660" y="558" text-anchor="middle">results — chunk_id, title, path, score, text</text>
+        <path class="ln-d" d="M 850 564 L 476 564"/>
+
+        <!-- 14 -->
+        <text class="ti" x="280" y="586" text-anchor="middle">event: tool_result — the passages, for the sources panel</text>
+        <path class="ln-d" d="M 470 592 L 96 592"/>
+
+        <!-- 15 -->
+        <text class="tl" x="565" y="614" text-anchor="middle">functionResponse —</text>
+        <text class="ti" x="565" y="627" text-anchor="middle">paired to the call by order</text>
+        <path class="ln-f" d="M 470 634 L 654 634"/>
+
+        <!-- 16 -->
+        <text class="ti" x="565" y="666" text-anchor="middle">final text, with [chunk:N] citations</text>
+        <path class="ln-d" d="M 660 672 L 476 672"/>
+
+        <!-- 17 -->
+        <text class="ti" x="280" y="694" text-anchor="middle">event: token … then event: done</text>
+        <path class="ln-d" d="M 470 700 L 96 700"/>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="key-f"></i>a call</span>
+      <span><i class="key-i"></i>a result or an event</span>
+    </div>
+    <figcaption>
+      <b>The tool call costs no network hop.</b> Chat and Tools are the same
+      process, so the arrow at <code>call(name, args)</code> is a function
+      call — the identical function an MCP client reaches over
+      <code>POST /mcp</code>. A keyword-only search skips step 10 entirely,
+      because the caller knows which vectors the mode needs and a keyword
+      search should cost nothing at the embedding API. Once the response
+      headers are sent the status code is fixed, so any later failure arrives
+      as an SSE <code>error</code> event rather than an HTTP status.
+    </figcaption>
+  </figure>
+
+  <div class="body">
+    <h3>PATH TWO · A FILE BEING INDEXED</h3>
+    <p>
+      No queue, no watcher, no upload endpoint. A file lands in the folder and
+      is searchable within five minutes, because an unchanged corpus costs a
+      read and a hash and nothing else.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-tall">
+      <svg viewBox="0 0 1000 880" role="img" aria-label="Ingestion flow: the scanner walks the library folder, filters by extension, skips unchanged files by hash, rejects anything that is not strict UTF-8, chunks the rest, writes Postgres first and then embeds and upserts into Qdrant.">
+
+        <!-- main spine -->
+        <rect class="bx2" x="140" y="30" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="54">library/ — walked on boot,</text>
+        <text class="tn" x="156" y="72">then every 5 minutes</text>
+
+        <path class="ln-f" d="M 290 86 L 290 110"/>
+
+        <rect class="bx" x="140" y="112" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="136">Extension in the allowlist?</text>
+        <text class="ts" x="156" y="156">txt md markdown rst log csv tsv json …</text>
+        <path class="ln-t" d="M 440 140 L 514 140"/>
+        <text class="ti" x="477" y="132" text-anchor="middle">no</text>
+        <rect class="bxo" x="520" y="118" width="380" height="44" rx="2"/>
+        <text class="ts" x="534" y="136">skipped, and logged — a stray image in a</text>
+        <text class="ts" x="534" y="152">library folder is normal, not a fault</text>
+
+        <path class="ln-f" d="M 290 168 L 290 192"/>
+
+        <rect class="bx" x="140" y="194" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="218">sha-256 == document.sha256?</text>
+        <text class="ts" x="156" y="238">the registry the scanner diffs against</text>
+        <path class="ln-t" d="M 440 222 L 514 222"/>
+        <text class="ti" x="477" y="214" text-anchor="middle">yes</text>
+        <rect class="bxo" x="520" y="200" width="380" height="44" rx="2"/>
+        <text class="ts" x="534" y="218">unchanged — a read and a hash. No writes,</text>
+        <text class="ts" x="534" y="234">no embedding call. This is why a poll suffices.</text>
+
+        <path class="ln-f" d="M 290 250 L 290 274"/>
+
+        <rect class="bx" x="140" y="276" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="300">NUL check, then strict UTF-8</text>
+        <text class="ts" x="156" y="320">malformed input REPORTs, never substitutes</text>
+        <path class="ln-t" d="M 440 304 L 514 304"/>
+        <text class="ti" x="477" y="296" text-anchor="middle">fails</text>
+        <rect class="bxo" x="520" y="282" width="380" height="44" rx="2"/>
+        <text class="ts" x="534" y="300">not text — skipped. A PDF renamed .txt passes</text>
+        <text class="ts" x="534" y="316">the extension test; this is the one that catches it.</text>
+
+        <path class="ln-f" d="M 290 332 L 290 356"/>
+
+        <rect class="bx" x="140" y="358" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="382">Chunker — the paragraph rule</text>
+        <text class="ts" x="156" y="402">glue &lt; 90 chars forward · split &gt; 3000 on sentences</text>
+
+        <path class="ln-f" d="M 290 414 L 290 438"/>
+
+        <rect class="bx" x="140" y="440" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="464">Postgres — replaceDocument</text>
+        <text class="ts" x="156" y="484">one transaction; it assigns the chunk ids</text>
+
+        <path class="ln-f" d="M 290 496 L 290 520"/>
+
+        <rect class="bx" x="140" y="522" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="546">Qdrant — drop this document's</text>
+        <text class="tn" x="156" y="564">stale points</text>
+
+        <path class="ln-f" d="M 290 578 L 290 602"/>
+
+        <rect class="bx" x="140" y="604" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="628">Embed + score</text>
+        <text class="ts" x="156" y="648">Gemini batch of 32, L2 · BM25 tf against avgdl</text>
+
+        <path class="ln-f" d="M 290 660 L 290 684"/>
+
+        <rect class="bx" x="140" y="686" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="710">Qdrant — upsert, batch 256</text>
+        <text class="ts" x="156" y="730">point id = chunk.id, in both stores</text>
+
+        <!-- the ordering annotation -->
+        <path class="hair" d="M 460 440 L 486 440 L 486 742 L 460 742"/>
+        <path class="hair" d="M 486 591 L 516 591"/>
+        <rect class="bx2" x="520" y="530" width="380" height="122" rx="2"/>
+        <text class="tg" x="534" y="552">WHY POSTGRES COMMITS FIRST</text>
+        <text class="ts" x="534" y="574">If embedding fails after that commit, the chunks</text>
+        <text class="ts" x="534" y="590">exist without vectors — recoverable, because the</text>
+        <text class="ts" x="534" y="606">text lives in exactly one place and POST /reindex</text>
+        <text class="ts" x="534" y="622">rebuilds them. The sha-256 is already committed,</text>
+        <text class="ts" x="534" y="638">so the next scan will not loop on the same file.</text>
+
+        <!-- mirror branch -->
+        <path class="hair" d="M 140 786 L 900 786"/>
+        <text class="tg" x="140" y="812">LIBRARY_MIRROR = ON (THE DEFAULT) — THE FOLDER IS THE SOURCE OF TRUTH</text>
+        <text class="ts" x="140" y="834">A path registered in `document` that no file matched on this scan is removed:</text>
+        <text class="ts" x="140" y="850">the document row, its chunks (by cascade), and its points in Qdrant.</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="key-f"></i>the indexing path</span>
+      <span><i class="key-t"></i>the file drops out here</span>
+    </div>
+    <figcaption>
+      <b>Text only, enforced twice.</b> The extension allowlist is the cheap
+      test and the strict decode is the one that matters — without it a
+      mislabelled binary is indexed as kilobytes of mojibake that pollutes
+      every subsequent search. The average chunk length that BM25 normalises
+      against is computed once per scan rather than once per document, so a
+      document's length normalisation does not depend on how many files
+      happened to be processed before it.
+    </figcaption>
+  </figure>
+
+  <div class="body">
+    <h3>PATH THREE · THE TWO KEYCLOAK URLS</h3>
+    <p>
+      The issuer and the JWKS URL point at the same realm and are deliberately
+      different strings. Getting this wrong rejects every token, with a message
+      that sends you looking somewhere else entirely.
+    </p>
+  </div>
+
+  <figure>
+    <div class="scroll w-md">
+      <svg viewBox="0 0 1000 400" role="img" aria-label="The browser signs in through nginx, so Keycloak stamps the public URL as the token issuer; the gateway fetches signing keys directly from the Keycloak service, because the public URL resolves to the ui container from inside the network.">
+
+        <rect class="bx" x="40" y="56" width="190" height="64" rx="2"/>
+        <text class="tn" x="56" y="82">Browser</text>
+        <text class="ts" x="56" y="102">redirected by keycloak-js</text>
+
+        <rect class="bx" x="330" y="56" width="190" height="64" rx="2"/>
+        <text class="tn" x="346" y="82">ui — nginx</text>
+        <text class="ts" x="346" y="102">/seshat/auth/ …</text>
+
+        <rect class="bx" x="660" y="56" width="290" height="64" rx="2"/>
+        <text class="tn" x="676" y="80">keycloak</text>
+        <text class="ts" x="676" y="100">stamps iss =</text>
+        <text class="ts" x="676" y="114">${PUBLIC_URL}/seshat/auth/realms/seshat</text>
+
+        <rect class="bx" x="330" y="270" width="190" height="64" rx="2"/>
+        <text class="tn" x="346" y="294">gateway</text>
+        <text class="ts" x="346" y="314">checks iss == KEYCLOAK_ISSUER</text>
+
+        <path class="ln-f" d="M 230 88 L 324 88"/>
+        <text class="tl" x="277" y="80" text-anchor="middle">sign in</text>
+
+        <path class="ln-f" d="M 520 88 L 654 88"/>
+        <text class="tl" x="587" y="80" text-anchor="middle">path forwarded verbatim</text>
+
+        <path class="ln" d="M 520 302 L 805 302 L 805 126"/>
+        <text class="tl" x="662" y="292" text-anchor="middle">KEYCLOAK_JWKS_URL — http://keycloak:8810/… , direct</text>
+
+        <path class="ln-t" d="M 425 270 L 425 126"/>
+        <path class="xmark" d="M 416 189 L 434 205 M 434 189 L 416 205"/>
+        <text class="tl" x="446" y="186">the public URL resolves</text>
+        <text class="tl" x="446" y="200">HERE from inside the</text>
+        <text class="tl" x="446" y="214">network — to nginx, which</text>
+        <text class="tl" x="446" y="228">would never serve keys</text>
+
+        <path class="hair" d="M 40 360 L 950 360"/>
+        <text class="tg" x="40" y="384">SAME REALM · TWO ADDRESSES · ONE IS WHAT THE TOKEN SAYS, THE OTHER IS WHERE THE KEYS COME FROM</text>
+      </svg>
+    </div>
+    <figcaption>
+      <b>The issuer is the browser-facing URL, because that is what Keycloak
+      stamps into the token.</b> The JWKS URL is where the gateway container
+      fetches the signing keys, and it cannot use the public URL — inside the
+      compose network that address resolves to the <code>ui</code> container.
+      The installer verifies that the issuer Keycloak advertises matches the
+      one the gateway checks, before you discover the mismatch as a 401 on
+      every request.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     REFERENCE
+     ══════════════════════════════════════════════════════════════════════ -->
+<section class="register" id="reference">
+  <div class="rnum">·</div>
+  <div class="rhead">
+    <p class="eyebrow">REFERENCE</p>
+    <h2>The surfaces, in full</h2>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <caption>THE HTTP SURFACE — GATEWAY, PORT 8090</caption>
+      <thead>
+        <tr><th>Route</th><th>Method</th><th>Auth</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>/chat</code></td><td>POST</td><td>use-ui</td><td>One chat turn as Server-Sent Events: <code>token</code>, <code>tool_call</code>, <code>tool_result</code>, <code>done</code>, <code>error</code>.</td></tr>
+        <tr><td><code>/mcp</code></td><td>POST</td><td>use-ui, for <code>tools/call</code> only</td><td>MCP Streamable HTTP — one JSON-RPC message in, one out. <code>initialize</code>, <code>ping</code> and <code>tools/list</code> answer unauthenticated so a client can discover the catalogue.</td></tr>
+        <tr><td><code>/chunk/N</code></td><td>GET</td><td>use-ui</td><td>One paragraph plus <code>?around=</code> neighbours, unwrapped from the tool shape into plain JSON. What a citation opens.</td></tr>
+        <tr><td><code>/config</code></td><td>GET</td><td>use-ui</td><td>Model name, document and chunk counts, corpus size, whether chat is enabled.</td></tr>
+        <tr><td><code>/reindex</code></td><td>POST</td><td>admin</td><td>Re-embed every chunk from Postgres without touching the folder. Returns <code>202</code> and runs in the background.</td></tr>
+        <tr><td><code>/health</code></td><td>GET</td><td>none</td><td><code>200</code> only after a real round trip to both stores has succeeded.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <caption>THE TWO TOOLS — ONE DEFINITION, TWO CALLERS</caption>
+      <thead>
+        <tr><th>Tool</th><th>Arguments</th><th>What it returns</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>search</code></td>
+          <td><code>query</code> · <code>mode</code> (hybrid | dense | keyword) · <code>top_k</code> 1–25, default 6</td>
+          <td>Best paragraphs with <code>chunk_id</code>, <code>document_id</code>, title, path, ordinal, score and text. Hybrid fuses BM25 and dense similarity server-side with reciprocal rank fusion.</td>
+        </tr>
+        <tr>
+          <td><code>load_chunk</code></td>
+          <td><code>chunk_id</code> · <code>before</code> 0–10 · <code>after</code> 0–10</td>
+          <td>One paragraph, optionally with neighbours from the same document. Ordinals are contiguous, so the window is a range and Postgres clamps it at the document's edges by returning fewer rows.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <caption>PORTS AND EXPOSURE</caption>
+      <thead>
+        <tr><th>Service</th><th class="num-col">Port</th><th>Published</th><th>Reached by</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>ui</code></td><td class="num-col">80</td><td>yes — <code>127.0.0.1:8800</code></td><td>The browser, through the host's nginx.</td></tr>
+        <tr><td><code>gateway</code></td><td class="num-col">8090</td><td>no (commented out)</td><td><code>ui</code> on the compose network. Publish it to point an MCP client at <code>/mcp</code>.</td></tr>
+        <tr><td><code>keycloak</code></td><td class="num-col">8810</td><td>no</td><td><code>ui</code> for the browser; <code>gateway</code> directly for the JWKS.</td></tr>
+        <tr><td><code>postgres</code></td><td class="num-col">5432</td><td>no</td><td><code>gateway</code> only.</td></tr>
+        <tr><td><code>qdrant</code></td><td class="num-col">6334</td><td>no</td><td><code>gateway</code> only, over gRPC. 6333 is the dashboard.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <caption>THE SETTINGS THAT CHANGE THE SHAPE</caption>
+      <thead>
+        <tr><th>Variable</th><th>Default</th><th>What it governs</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>PUBLIC_URL</code></td><td><code>http://localhost:8800</code></td><td>The origin the <em>browser</em> uses. It becomes the token issuer, so it must match exactly or every token is rejected.</td></tr>
+        <tr><td><code>EMBED_DIMS</code></td><td class="num-col">768</td><td>Index-breaking. Changing it means stored vectors no longer match query vectors, silently — drop the Qdrant volume and re-index.</td></tr>
+        <tr><td><code>LIBRARY_MIRROR</code></td><td><code>on</code></td><td>On, the folder is the source of truth and deletions propagate. Off, documents accumulate and are only ever updated.</td></tr>
+        <tr><td><code>LIBRARY_SCAN_MINUTES</code></td><td class="num-col">5</td><td>How long a new file waits before it is searchable.</td></tr>
+        <tr><td><code>KEYCLOAK_AUDIENCE</code></td><td><code>seshat-ui</code></td><td>Unset, any token the realm issued is accepted — including one minted for another client.</td></tr>
+        <tr><td><code>KEYCLOAK_ISSUER</code></td><td>—</td><td>Blank turns auth off entirely and every caller becomes an anonymous admin. Compose always sets it.</td></tr>
+        <tr><td><code>MAX_TOOL_ROUNDS</code></td><td class="num-col">8</td><td>How many rounds of tool calls a turn may take before it gives up and says so.</td></tr>
+        <tr><td><code>BIND_ADDR</code></td><td><code>127.0.0.1</code></td><td>Loopback by default, so on a server the stack cannot be reached beside nginx, bypassing TLS.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     OMISSIONS
+     ══════════════════════════════════════════════════════════════════════ -->
+<section class="register" id="omissions">
+  <div class="rnum">·</div>
+  <div class="rhead">
+    <p class="eyebrow">THE SHAPE OF WHAT IS ABSENT</p>
+    <h2>Named, so each is a decision</h2>
+    <p class="lede">
+      Every box that is not in the diagrams above was left out on purpose.
+      These are the ones worth knowing about.
+    </p>
+  </div>
+
+  <div class="notes">
+    <dl>
+      <dt>No reranker</dt>
+      <dd>
+        A cross-encoder rerank would measurably improve ordering, and it needs
+        a local model — the one dependency this build exists to avoid.
+        Reciprocal rank fusion over the two retrievers is the ranking.
+      </dd>
+
+      <dt>No document permissions</dt>
+      <dd>
+        Everyone who can sign in can search everything. The corpus is one
+        folder, and per-document permissions need a source of truth for them
+        that a folder is not.
+      </dd>
+
+      <dt>No server-side transcripts</dt>
+      <dd>
+        Conversations live in the browser's <code>localStorage</code>. A
+        question is never written to a disk the person asking it does not own;
+        the cost is that a thread does not follow you to another machine.
+      </dd>
+
+      <dt>No upload path</dt>
+      <dd>
+        Files arrive by landing in the folder. There is no endpoint that
+        accepts one, which is why the folder can be mounted read-only.
+      </dd>
+
+      <dt>No OCR, no format conversion</dt>
+      <dd>
+        Text files, as specified. Anything that fails a strict UTF-8 decode is
+        logged and skipped.
+      </dd>
+
+      <dt>Term hashing rather than a dictionary</dt>
+      <dd>
+        BM25 terms hash to 31-bit indices, so nothing has to keep a term table
+        in sync between indexing and querying. Two terms can collide; at 2³¹
+        slots against a vocabulary in the tens of thousands that is a ranking
+        nuisance, not a correctness problem.
+      </dd>
+    </dl>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap">
+  <div class="colophon">
+    Drawn from the source at <code>seshat@d943d56</code> — <code>docker-compose.yml</code>,
+    the fourteen Kotlin files under <code>gateway/src/main/kotlin</code>, the
+    single-page application under <code>ui/src</code>, and
+    <code>ui/nginx.conf</code>. Palette, typefaces and the rule that governs
+    them are the project's own, taken from <code>ui/src/index.css</code>:
+    rubric red marks what begins something and what must not be misread —
+    headings and the level numerals, and nothing else. Faience carries flow.
+    Orpiment is hairlines and measurement geometry only, never type.
+  </div>
+</footer>
