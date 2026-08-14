@@ -47,6 +47,16 @@
       "email": "peter@peter.co.nz",
       "credentials": [{ "type": "password", "value": "$DangerMouse", "temporary": false }],
       "groups": ["/admins"]
+    },
+    {
+      "username": "guest",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Guest",
+      "lastName": "User",
+      "email": "info@seshat.com",
+      "credentials": [{ "type": "password", "value": "ChoDeisheequ7oLohSuo", "temporary": false }],
+      "groups": ["/admins"]
     }
   ],
 
