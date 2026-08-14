@@ -1,2 +1,4 @@
 *.pdf
-
+# build-pdf.py writes a wrapped copy of the fragment beside itself and does not
+# clean it up — it is an input to Chromium, not a document.
+print-*.html
