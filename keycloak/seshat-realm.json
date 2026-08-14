@@ -39,7 +39,7 @@
 
   "users": [
     {
-      "username": "peter",
+      "username": "rock",
       "enabled": true,
       "emailVerified": true,
       "firstName": "Rock",
@@ -47,16 +47,6 @@
       "email": "peter@peter.co.nz",
       "credentials": [{ "type": "password", "value": "$DangerMouse", "temporary": false }],
       "groups": ["/admins"]
-    },
-    {
-      "username": "theta",
-      "enabled": true,
-      "emailVerified": true,
-      "firstName": "Theta",
-      "lastName": "Theta",
-      "email": "theta@peter.co.nz",
-      "credentials": [{ "type": "password", "value": "Theta", "temporary": false }],
-      "groups": ["/readers"]
     }
   ],
 
