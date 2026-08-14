@@ -1,7 +1,13 @@
 /**
- * Text file -> paragraphs.
+ * Text file -> paragraphs. The FALLBACK chunker.
  *
- * The brief is literal: split along paragraphs, meaning two or more consecutive
+ * Semantic bunching (Semantic.kt) is what normally runs; this is what indexes a
+ * document when SEMANTIC_CHUNKING is off, when a file is one sentence long, or
+ * when the embedding API is unreachable in the middle of a scan — a document
+ * chunked by paragraph beats a document not indexed at all, and the chunker
+ * signature on the row means the next scan re-chunks it properly.
+ *
+ * The rule is literal: split along paragraphs, meaning two or more consecutive
  * line breaks. That rule alone produces two shapes of bad chunk, so two
  * corrections sit on top of it and nothing else does:
  *
@@ -16,10 +22,9 @@
  *              that means nothing in particular. Anything over [MAX_CHARS] is
  *              cut on sentence boundaries.
  *
- * No semantic chunker, no overlap, no structure parser. Those are real
- * improvements and they are also the thing that turns a minimum system into a
- * pipeline; the interface here (a list of ordinals with text) is what they
- * would slot into.
+ * No overlap and no structure parser, here or in the semantic chunker. The
+ * interface both produce — a list of ordinals with text — is what either would
+ * slot into.
  */
 object Chunker {
 
@@ -38,7 +43,7 @@ object Chunker {
     /** Sentence end followed by whitespace — used only to cut oversized runs. */
     private val SENTENCE_END = Regex("(?<=[.!?])\\s+")
 
-    fun split(body: String): List<Chunk> {
+    fun split(body: String, minChars: Int = MIN_CHARS, maxChars: Int = MAX_CHARS): List<Chunk> {
         val paragraphs = PARAGRAPH_BREAK.split(body)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -51,7 +56,7 @@ object Chunker {
         for (p in paragraphs) {
             if (pending.isNotEmpty()) pending.append("\n\n")
             pending.append(p)
-            if (pending.length >= MIN_CHARS) {
+            if (pending.length >= minChars) {
                 merged.add(pending.toString())
                 pending.setLength(0)
             }
@@ -63,7 +68,7 @@ object Chunker {
 
         val out = ArrayList<Chunk>()
         for (text in merged) {
-            for (piece in capped(text)) {
+            for (piece in capped(text, maxChars)) {
                 out.add(Chunk(out.size, piece, Bm25.tokenize(piece).size))
             }
         }
@@ -74,12 +79,12 @@ object Chunker {
      *  over [MAX_CHARS]. A single sentence longer than the cap (no punctuation
      *  at all — a CSV row, a base64 blob) is emitted whole rather than cut
      *  mid-word: better one oversized chunk than a chunk that ends in gibberish. */
-    private fun capped(text: String): List<String> {
-        if (text.length <= MAX_CHARS) return listOf(text)
+    private fun capped(text: String, maxChars: Int): List<String> {
+        if (text.length <= maxChars) return listOf(text)
         val out = ArrayList<String>()
         val buf = StringBuilder()
         for (sentence in SENTENCE_END.split(text)) {
-            if (buf.isNotEmpty() && buf.length + 1 + sentence.length > MAX_CHARS) {
+            if (buf.isNotEmpty() && buf.length + 1 + sentence.length > maxChars) {
                 out.add(buf.toString().trim())
                 buf.setLength(0)
             }

@@ -1,12 +1,23 @@
 import Mark from './Mark'
+import Uploader from './Uploader'
 import { PlusIcon, TrashIcon } from './icons'
-import { displayEmail, displayName, hasRole, signOut } from '../auth/keycloak'
+import { displayEmail, displayName, signOut } from '../auth/keycloak'
 import { conversationsActions } from '../store/conversationsSlice'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { reindex } from '../api/gateway'
+import type { UploadPolicy } from '../types'
 
-/** The conversation rail: the wordmark, the threads, and who is signed in. */
-export default function Rail({ onNavigate }: { onNavigate?: () => void }) {
+/** The conversation rail: the wordmark, the threads, the library, and who is
+ *  signed in. */
+export default function Rail({
+  onNavigate,
+  uploads,
+  onUploaded,
+}: {
+  onNavigate?: () => void
+  /** Null until GET /config lands, and for accounts that may not upload. */
+  uploads: UploadPolicy | null
+  onUploaded: () => void
+}) {
   const dispatch = useAppDispatch()
   const { order, byId, activeId } = useAppSelector((s) => s.conversations)
 
@@ -72,6 +83,8 @@ export default function Rail({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </nav>
 
+      <Uploader policy={uploads} onUploaded={onUploaded} />
+
       <div className="rail-foot">
         <div className="who">
           <b>{displayName()}</b>
@@ -81,18 +94,6 @@ export default function Rail({ onNavigate }: { onNavigate?: () => void }) {
           <button type="button" className="chip" onClick={signOut}>
             Sign out
           </button>
-          {hasRole('admin') ? (
-            <button
-              type="button"
-              className="chip"
-              title="Re-embed every paragraph from Postgres"
-              onClick={() => {
-                reindex().catch((e: Error) => window.alert(`Reindex failed: ${e.message}`))
-              }}
-            >
-              Reindex
-            </button>
-          ) : null}
         </div>
       </div>
     </aside>

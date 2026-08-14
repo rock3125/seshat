@@ -39,7 +39,9 @@ class Sse(private val out: OutputStream) {
  *   POST /mcp       MCP Streamable HTTP — one JSON-RPC message in, one out
  *   GET  /chunk/N   one paragraph plus neighbours, for the UI's sources panel
  *   GET  /config    what the UI needs to render itself (model name, corpus size)
- *   POST /reindex   re-embed the corpus from Postgres (admin)
+ *   POST /upload    one file of any format into the library folder — converted
+ *                   to text if it is not text, and indexed before it answers
+ *   POST /reindex   reconcile with the library folder, then re-embed (admin)
  *   GET  /health    readiness, unauthenticated
  *
  * Auth is one rule with one deliberate exception: with KEYCLOAK_ISSUER set,
@@ -70,6 +72,7 @@ class Http(
         server.createContext("/chat") { it.handle(::chatRoute) }
         server.createContext("/mcp") { it.handle(::mcpRoute) }
         server.createContext("/chunk/") { it.handle(::chunkRoute) }
+        server.createContext("/upload") { it.handle(::uploadRoute) }
         server.createContext("/reindex") { it.handle(::reindexRoute) }
         server.createContext("/") { it.handle { ex -> ex.json(404, JSONObject().put("error", "not found")) } }
         server.executor = Executors.newVirtualThreadPerTaskExecutor()
@@ -101,14 +104,26 @@ class Http(
     }
 
     private fun config(ex: HttpExchange) {
-        requireUser(ex) ?: return
+        val who = requireUser(ex) ?: return
         val stats = db.stats()
         ex.json(200, JSONObject()
             .put("model", cfg.geminiModel)
             .put("documents", stats.documents)
             .put("chunks", stats.chunks)
             .put("library_bytes", stats.bytes)
-            .put("chat_enabled", cfg.geminiApiKey.isNotBlank()))
+            .put("chat_enabled", cfg.geminiApiKey.isNotBlank())
+            .put("scan_minutes", cfg.scanMinutes)
+            // The upload rules come from here rather than being repeated in the
+            // bundle: the size the UI refuses locally, whether the control
+            // renders at all, and whether it should filter the file picker are
+            // the server's answers, so they cannot drift out of step with what
+            // /upload will actually accept. `converts` is what tells the UI to
+            // stop filtering — with Tika in the jar, every format is a format.
+            .put("upload", JSONObject()
+                .put("allowed", mayUpload(who))
+                .put("max_bytes", cfg.uploadMaxBytes)
+                .put("converts", true)
+                .put("text_extensions", JSONArray(Library.TEXT_EXTENSIONS.sorted()))))
     }
 
     private fun chatRoute(ex: HttpExchange) {
@@ -203,6 +218,74 @@ class Http(
         ex.json(200, JSONObject(text))
     }
 
+    /**
+     * One file, one request: `POST /upload?name=notes.md` with the bytes as the
+     * body.
+     *
+     * Not multipart. A browser can only send several files in one multipart
+     * body, and then the whole batch shares one status and one progress bar —
+     * whereas the thing a person uploading five documents wants to know is
+     * which of the five landed. One request each gives every file its own
+     * verdict, and costs a hand-rolled multipart parser nothing because there
+     * isn't one.
+     */
+    private fun uploadRoute(ex: HttpExchange) {
+        if (ex.requestMethod != "POST") return ex.methodNotAllowed("POST")
+        val who = requireUser(ex) ?: return
+        if (!mayUpload(who)) {
+            return ex.json(403, JSONObject().put("error",
+                "the 'admin' role is required to add documents to the library"))
+        }
+
+        val name = query(ex)["name"]?.trim().orEmpty()
+        if (name.isEmpty()) {
+            return ex.json(400, JSONObject().put("error", "?name=<file name> is required"))
+        }
+
+        // Content-Length first so an oversized upload is refused before it is
+        // read, then a hard cap on the read itself — the header is the client's
+        // claim, and a chunked request has none at all.
+        val declared = ex.requestHeaders.getFirst("Content-Length")?.toLongOrNull()
+        if (declared != null && declared > cfg.uploadMaxBytes) return ex.tooLarge()
+        val bytes = ex.requestBody.readNBytes((cfg.uploadMaxBytes + 1).toInt())
+        if (bytes.size > cfg.uploadMaxBytes) return ex.tooLarge()
+
+        val upload = try {
+            library.upload(name, bytes)
+        } catch (e: Library.Rejected) {
+            log.info("upload of {} by {} refused: {}", name, who.username, e.message)
+            return ex.json(400, JSONObject().put("error", e.message))
+        } catch (e: java.nio.file.AccessDeniedException) {
+            // Almost always the mount: a read-only bind, or a folder owned by a
+            // uid the container is not running as. Worth its own message —
+            // "internal error" would send someone reading Kotlin.
+            log.error("cannot write to the library folder: {}", e.toString())
+            return ex.json(503, JSONObject().put("error",
+                "the library folder is not writable by the gateway — check the mount in " +
+                    "docker-compose.yml (it must not be :ro) and its ownership"))
+        } catch (e: IllegalStateException) {
+            return ex.json(503, JSONObject().put("error", e.message))
+        }
+
+        val stats = db.stats()
+        ex.json(200, JSONObject()
+            .put("source", upload.source)
+            .put("path", upload.path)
+            .put("bytes", upload.bytes)
+            .put("replaced", upload.replaced)
+            .put("status", upload.status)
+            .put("chunks", upload.chunks ?: JSONObject.NULL)
+            .put("converted_from", upload.convertedFrom ?: JSONObject.NULL)
+            .put("truncated", upload.truncated)
+            .put("documents", stats.documents)
+            .put("total_chunks", stats.chunks))
+    }
+
+    /** Who may add to the corpus. Everyone signed in when UPLOAD_ADMIN_ONLY is
+     *  off; admins only by default, because the library is shared. */
+    private fun mayUpload(who: Principal): Boolean =
+        auth == null || !cfg.uploadAdminOnly || who.isAdmin
+
     private fun reindexRoute(ex: HttpExchange) {
         if (ex.requestMethod != "POST") return ex.methodNotAllowed("POST")
         val who = requireUser(ex) ?: return
@@ -212,6 +295,10 @@ class Http(
         // Long job, and the caller only needs to know it started.
         Thread {
             runCatching { library.reindex() }
+                .onSuccess {
+                    log.info("reindex by {}: {} chunk(s) re-embedded, {} document(s) added, {} removed",
+                        who.username, it.chunks, it.scan.indexed, it.scan.removed)
+                }
                 .onFailure { log.error("reindex failed: {}", it.toString()) }
         }.apply { isDaemon = true; name = "reindex" }.start()
         ex.json(202, JSONObject().put("status", "reindex started"))
@@ -295,6 +382,12 @@ class Http(
     private fun HttpExchange.empty(status: Int) {
         sendResponseHeaders(status, -1)
         responseBody.close()
+    }
+
+    private fun HttpExchange.tooLarge() {
+        json(413, JSONObject().put("error",
+            "the file is larger than the ${cfg.uploadMaxBytes / (1024 * 1024)}MB upload limit " +
+                "(UPLOAD_MAX_MB)"))
     }
 
     private fun HttpExchange.methodNotAllowed(allowed: String) {

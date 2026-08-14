@@ -721,8 +721,8 @@ td code, th code { background: none; padding: 0; }
 
         <!-- gateway -> library -->
         <path class="ln" d="M 700 420 L 780 420 L 780 485 L 914 485"/>
-        <text class="tl" x="847" y="457" text-anchor="middle">read-only mount</text>
-        <text class="ti" x="847" y="471" text-anchor="middle">scanned every 5 min</text>
+        <text class="tl" x="847" y="457" text-anchor="middle">mounted read-write</text>
+        <text class="ti" x="847" y="471" text-anchor="middle">scanned every minute</text>
 
         <!-- exposure annotation: the two stores publish nothing -->
         <path class="hair" d="M 340 560 L 372 560"/>
@@ -829,10 +829,10 @@ td code, th code { background: none; padding: 0; }
         <rect class="bx" x="676" y="182" width="210" height="64" rx="2"/>
         <text class="tt" x="692" y="206">Library.kt</text>
         <text class="ts" x="692" y="224">scan on boot, then</text>
-        <text class="ts" x="692" y="238">every 5 min · sha-256</text>
+        <text class="ts" x="692" y="238">every minute · sha-256</text>
         <path class="ln" d="M 760 138 L 760 176"/>
         <text class="tl" x="770" y="154">POST</text>
-        <text class="ti" x="770" y="168">/reindex</text>
+        <text class="ti" x="770" y="168">/upload · /reindex</text>
 
         <!-- Tools -->
         <rect class="bx2" x="56" y="286" width="230" height="64" rx="2"/>
@@ -850,9 +850,9 @@ td code, th code { background: none; padding: 0; }
 
         <!-- Chunker -->
         <rect class="bx" x="676" y="286" width="210" height="64" rx="2"/>
-        <text class="tt" x="692" y="310">Chunker.kt</text>
-        <text class="ts" x="692" y="328">paragraph rule, glue &lt; 90,</text>
-        <text class="ts" x="692" y="342">split &gt; 3000 on sentences</text>
+        <text class="tt" x="692" y="310">Semantic.kt · Extract.kt</text>
+        <text class="ts" x="692" y="328">Tika in, sentences bunched</text>
+        <text class="ts" x="692" y="342">by cosine · min 200 chars</text>
         <path class="ln-d" d="M 760 246 L 760 280"/>
         <text class="ti" x="770" y="268">decoded text</text>
 
@@ -1191,9 +1191,12 @@ td code, th code { background: none; padding: 0; }
   <div class="body">
     <h3>PATH TWO · A FILE BEING INDEXED</h3>
     <p>
-      No queue, no watcher, no upload endpoint. A file lands in the folder and
-      is searchable within five minutes, because an unchanged corpus costs a
-      read and a hash and nothing else.
+      No queue and no watcher. A file lands in the folder — copied in by hand,
+      or written there by <code>POST /upload</code> — and the same path below
+      indexes it. The difference is only when: an upload runs it inside the
+      request, while a file copied in waits for the next tick, one minute at
+      most. That cadence is affordable because an unchanged corpus costs a read
+      and a hash and nothing else.
     </p>
   </div>
 
@@ -1204,7 +1207,7 @@ td code, th code { background: none; padding: 0; }
         <!-- main spine -->
         <rect class="bx2" x="140" y="30" width="300" height="56" rx="2"/>
         <text class="tn" x="156" y="54">library/ — walked on boot,</text>
-        <text class="tn" x="156" y="72">then every 5 minutes</text>
+        <text class="tn" x="156" y="72">then every minute</text>
 
         <path class="ln-f" d="M 290 86 L 290 110"/>
 
@@ -1242,8 +1245,8 @@ td code, th code { background: none; padding: 0; }
         <path class="ln-f" d="M 290 332 L 290 356"/>
 
         <rect class="bx" x="140" y="358" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="382">Chunker — the paragraph rule</text>
-        <text class="ts" x="156" y="402">glue &lt; 90 forward · split &gt; 3000 at sentences</text>
+        <text class="tn" x="156" y="382">Semantic chunking — cosine bunching</text>
+        <text class="ts" x="156" y="402">min 200 chars · max 3000 · threshold 0.75</text>
 
         <path class="ln-f" d="M 290 414 L 290 438"/>
 
@@ -1292,10 +1295,13 @@ td code, th code { background: none; padding: 0; }
       <span><i class="key-t"></i>the file drops out here</span>
     </div>
     <figcaption>
-      <b>Text only, enforced twice.</b> The extension allowlist is the cheap
-      test and the strict decode is the one that matters — without it a
-      mislabelled binary is indexed as kilobytes of mojibake that pollutes
-      every subsequent search. The average chunk length that BM25 normalises
+      <b>Text only on disk — but not text only on the way in.</b> This is the
+      SCAN path, where the extension allowlist is the cheap test and the strict
+      decode is the one that matters: without it a mislabelled binary is indexed
+      as kilobytes of mojibake that pollutes every subsequent search. An upload
+      arrives at the same pipeline one step earlier, through Tika, which turns a
+      PDF or a Word file into the text this path then indexes. The average chunk
+      length that BM25 normalises
       against is computed once per scan rather than once per document, so a
       document's length normalisation does not depend on how many files
       happened to be processed before it.
@@ -1384,8 +1390,9 @@ td code, th code { background: none; padding: 0; }
         <tr><td><code>/chat</code></td><td>POST</td><td>use-ui</td><td>One chat turn as Server-Sent Events: <code>token</code>, <code>tool_call</code>, <code>tool_result</code>, <code>done</code>, <code>error</code>.</td></tr>
         <tr><td><code>/mcp</code></td><td>POST</td><td>use-ui, for <code>tools/call</code> only</td><td>MCP Streamable HTTP — one JSON-RPC message in, one out. <code>initialize</code>, <code>ping</code> and <code>tools/list</code> answer unauthenticated so a client can discover the catalogue.</td></tr>
         <tr><td><code>/chunk/N</code></td><td>GET</td><td>use-ui</td><td>One paragraph plus <code>?around=</code> neighbours, unwrapped from the tool shape into plain JSON. What a citation opens.</td></tr>
-        <tr><td><code>/config</code></td><td>GET</td><td>use-ui</td><td>Model name, document and chunk counts, corpus size, whether chat is enabled.</td></tr>
-        <tr><td><code>/reindex</code></td><td>POST</td><td>admin</td><td>Re-embed every chunk from Postgres without touching the folder. Returns <code>202</code> and runs in the background.</td></tr>
+        <tr><td><code>/config</code></td><td>GET</td><td>use-ui</td><td>Model name, document and chunk counts, corpus size, whether chat is enabled, and the upload rules this caller is subject to (allowed, size cap, extensions).</td></tr>
+        <tr><td><code>/upload</code></td><td>POST</td><td>admin, unless <code>UPLOAD_ADMIN_ONLY=off</code></td><td>One file of any format: <code>?name=</code> plus the bytes as the body. Anything that is not already text goes through Tika and is stored as <code>&lt;name&gt;.txt</code>; then it is chunked, embedded and indexed inside the request, so the response carries the chunk count and what it was converted from. A name that exists is replaced.</td></tr>
+        <tr><td><code>/reindex</code></td><td>POST</td><td>admin</td><td>A full folder pass — index what is new, unindex what is gone — and then re-embed every chunk from Postgres. Returns <code>202</code> and runs in the background.</td></tr>
         <tr><td><code>/health</code></td><td>GET</td><td>none</td><td><code>200</code> only after a real round trip to both stores has succeeded.</td></tr>
       </tbody>
     </table>
@@ -1438,7 +1445,13 @@ td code, th code { background: none; padding: 0; }
         <tr><td><code>PUBLIC_URL</code></td><td><code>http://localhost:8800</code></td><td>The origin the <em>browser</em> uses. It becomes the token issuer, so it must match exactly or every token is rejected.</td></tr>
         <tr><td><code>EMBED_DIMS</code></td><td class="num-col">768</td><td>Index-breaking. Changing it means stored vectors no longer match query vectors, silently — drop the Qdrant volume and re-index.</td></tr>
         <tr><td><code>LIBRARY_MIRROR</code></td><td><code>on</code></td><td>On, the folder is the source of truth and deletions propagate. Off, documents accumulate and are only ever updated.</td></tr>
-        <tr><td><code>LIBRARY_SCAN_MINUTES</code></td><td class="num-col">5</td><td>How long a new file waits before it is searchable.</td></tr>
+        <tr><td><code>LIBRARY_SCAN_MINUTES</code></td><td class="num-col">1</td><td>How often the folder is diffed against the index — how long a file copied in by hand waits, and how long a deleted one stays searchable. An upload through the UI is indexed in the request and waits for nothing.</td></tr>
+        <tr><td><code>UPLOAD_MAX_MB</code></td><td class="num-col">25</td><td>Per uploaded file. nginx's <code>client_max_body_size</code> must be at or above it, or its HTML 413 reaches the UI instead of the gateway's JSON.</td></tr>
+        <tr><td><code>UPLOAD_ADMIN_ONLY</code></td><td><code>on</code></td><td>The library is one shared corpus, so adding to it is an admin act by default. Off lets every <code>use-ui</code> account upload.</td></tr>
+        <tr><td><code>CHUNK_MIN_CHARS</code></td><td class="num-col">200</td><td>The floor a semantic bunch may not be under: below it the next sentence joins whatever the cosine says. Changing it re-chunks (and re-embeds) the whole corpus on the next scan, because each document records the chunker it was built with.</td></tr>
+        <tr><td><code>CHUNK_MAX_CHARS</code></td><td class="num-col">3000</td><td>The ceiling. A glossary is similar to itself all the way down and must still be cut somewhere.</td></tr>
+        <tr><td><code>SEMANTIC_THRESHOLD</code></td><td class="num-col">0.75</td><td>Cosine between the next sentence and the running centroid of the bunch. Higher cuts more often.</td></tr>
+        <tr><td><code>SEMANTIC_CHUNKING</code></td><td><code>on</code></td><td>Off falls back to the paragraph rule — which is also what runs if the embedding API is unreachable mid-scan.</td></tr>
         <tr><td><code>KEYCLOAK_AUDIENCE</code></td><td><code>seshat-ui</code></td><td>Unset, any token the realm issued is accepted — including one minted for another client.</td></tr>
         <tr><td><code>KEYCLOAK_ISSUER</code></td><td>—</td><td>Blank turns auth off entirely and every caller becomes an anonymous admin. Compose always sets it.</td></tr>
         <tr><td><code>MAX_TOOL_ROUNDS</code></td><td class="num-col">8</td><td>How many rounds of tool calls a turn may take before it gives up and says so.</td></tr>
@@ -1485,16 +1498,22 @@ td code, th code { background: none; padding: 0; }
         the cost is that a thread does not follow you to another machine.
       </dd>
 
-      <dt>No upload path</dt>
+      <dt>No delete from the UI</dt>
       <dd>
-        Files arrive by landing in the folder. There is no endpoint that
-        accepts one, which is why the folder can be mounted read-only.
+        Documents go in through the UI; they come out by deleting the file. The
+        folder stays the source of truth, and one direction of write is a much
+        smaller thing to reason about than two.
       </dd>
 
-      <dt>No OCR, no format conversion</dt>
+      <dt>No OCR</dt>
       <dd>
-        Text files, as specified. Anything that fails a strict UTF-8 decode is
-        logged and skipped.
+        Tika reads a document's text layer; a scanned page has none, and reading
+        it needs Tesseract installed beside the gateway. An upload with no text
+        in it is refused with that as the reason rather than indexed empty. On
+        the scan path nothing is converted at all: a file that fails the
+        extension test or a strict UTF-8 decode is logged and skipped, because
+        converting it would mean the gateway writing files into the folder that
+        nobody asked it to write.
       </dd>
 
       <dt>Term hashing rather than a dictionary</dt>

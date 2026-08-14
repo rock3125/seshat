@@ -52,4 +52,44 @@ export interface ServerConfig {
   chunks: number
   library_bytes: number
   chat_enabled: boolean
+  /** How often the gateway rescans the library folder for added and deleted
+   *  files. Shown to the reader, so a file dropped in by hand has a stated
+   *  arrival time rather than an unexplained wait. */
+  scan_minutes: number
+  upload: UploadPolicy
+}
+
+/** What this signed-in caller may add to the library, decided server-side. */
+export interface UploadPolicy {
+  allowed: boolean
+  max_bytes: number
+  /** True when the gateway converts non-text formats (Tika) — which means the
+   *  file picker must NOT filter by extension. */
+  converts: boolean
+  /** Bare extensions, no dot, stored as they arrive: 'md', 'txt', … Everything
+   *  else is converted to text on upload. */
+  text_extensions: string[]
+}
+
+/** What became of one uploaded file, as POST /upload reports it. */
+export interface UploadResult {
+  /** The name as uploaded — 'report.pdf'. */
+  source: string
+  /** The name it is stored and indexed under — 'report.pdf.txt' when converted. */
+  path: string
+  bytes: number
+  replaced: boolean
+  /** 'indexed' | 'unchanged' | 'no text to index' | 'queued' */
+  status: string
+  /** Chunks the document now holds, or null when indexing was deferred to the
+   *  next scan because the indexer was busy. */
+  chunks: number | null
+  /** The format it was converted from ('PDF', 'Word', …), or null if it was
+   *  already text. */
+  converted_from: string | null
+  /** True when the document was longer than EXTRACT_MAX_CHARS and only its
+   *  first part was indexed. */
+  truncated: boolean
+  documents: number
+  total_chunks: number
 }

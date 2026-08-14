@@ -182,7 +182,13 @@ EMBED_DIMS=768
 
 LIBRARY_DIR=$LIBRARY
 LIBRARY_MIRROR=on
-LIBRARY_SCAN_MINUTES=5
+LIBRARY_SCAN_MINUTES=1
+# The gateway writes uploaded documents into the library folder, so it runs as
+# whoever owns it — otherwise every uploaded file lands owned by root.
+LIBRARY_UID=$(stat -c %u "$LIBRARY")
+LIBRARY_GID=$(stat -c %g "$LIBRARY")
+UPLOAD_MAX_MB=25
+UPLOAD_ADMIN_ONLY=on
 
 SESHAT_PORT=$PORT
 # Loopback: nginx is the only thing that should reach the stack.

@@ -78,17 +78,21 @@ class Db(cfg: Config) : AutoCloseable {
 
     // --- documents ------------------------------------------------------------
 
-    data class DocRow(val id: Long, val path: String, val title: String, val sha256: String)
+    data class DocRow(
+        val id: Long, val path: String, val title: String,
+        val sha256: String, val chunkCount: Int, val chunker: String,
+    )
 
     /** Every document currently registered, by relative path. */
     fun documents(): Map<String, DocRow> = read { c ->
-        c.prepareStatement("select id, path, title, sha256 from document").use { st ->
+        c.prepareStatement("select id, path, title, sha256, chunk_count, chunker from document").use { st ->
             st.executeQuery().use { rs ->
                 buildMap {
                     while (rs.next()) {
                         put(rs.getString("path"),
                             DocRow(rs.getLong("id"), rs.getString("path"),
-                                rs.getString("title"), rs.getString("sha256")))
+                                rs.getString("title"), rs.getString("sha256"),
+                                rs.getInt("chunk_count"), rs.getString("chunker") ?: ""))
                     }
                 }
             }
@@ -106,21 +110,22 @@ class Db(cfg: Config) : AutoCloseable {
      * down the file is a different chunk in every way that matters here.
      */
     fun replaceDocument(
-        path: String, title: String, sha256: String, bytes: Long, chunks: List<Chunker.Chunk>,
+        path: String, title: String, sha256: String, bytes: Long,
+        chunks: List<Chunker.Chunk>, chunker: String,
     ): Pair<Long, List<Long>> = tx { c ->
         val docId = c.prepareStatement(
             """
-            insert into document (path, title, sha256, bytes, chunk_count, indexed_at)
-            values (?, ?, ?, ?, ?, now())
+            insert into document (path, title, sha256, bytes, chunk_count, chunker, indexed_at)
+            values (?, ?, ?, ?, ?, ?, now())
             on conflict (path) do update
               set title = excluded.title, sha256 = excluded.sha256,
                   bytes = excluded.bytes, chunk_count = excluded.chunk_count,
-                  indexed_at = now()
+                  chunker = excluded.chunker, indexed_at = now()
             returning id
             """,
         ).use { st ->
             st.setString(1, path); st.setString(2, title); st.setString(3, sha256)
-            st.setLong(4, bytes); st.setInt(5, chunks.size)
+            st.setLong(4, bytes); st.setInt(5, chunks.size); st.setString(6, chunker)
             st.executeQuery().use { rs -> rs.next(); rs.getLong(1) }
         }
 
@@ -295,6 +300,15 @@ class Db(cfg: Config) : AutoCloseable {
 
             create index if not exists chunk_document_ordinal_idx
                 on chunk (document_id, ordinal);
+
+            -- Which chunker produced this document's chunks, and with what
+            -- settings. A file whose bytes are unchanged but whose chunker
+            -- signature is not counts as changed, so editing CHUNK_MIN_CHARS in
+            -- .env re-chunks the corpus on the next scan instead of leaving it
+            -- half one shape and half another. Added by ALTER rather than in
+            -- the CREATE above: the table already exists on every deployment
+            -- that predates semantic chunking.
+            alter table document add column if not exists chunker text not null default '';
         """.trimIndent()
     }
 }

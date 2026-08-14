@@ -49,6 +49,14 @@ export const SourcesIcon = (p: Props) => (
   <Svg {...p}><path d="M4 5h9a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H4z" /><path d="M20 5v11.5" /></Svg>
 )
 
+export const UploadIcon = (p: Props) => (
+  <Svg {...p}><path d="M12 16V4M7.5 8.5L12 4l4.5 4.5" /><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16" /></Svg>
+)
+
+export const CheckIcon = (p: Props) => (
+  <Svg {...p}><path d="M5 12.5l4.5 4.5L19 7" /></Svg>
+)
+
 export const CloseIcon = (p: Props) => (
   <Svg {...p}><path d="M6 6l12 12M18 6L6 18" /></Svg>
 )

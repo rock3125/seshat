@@ -16,6 +16,14 @@ data class Config(
     val libraryDir: String,
     val libraryMirror: Boolean,
     val scanMinutes: Long,
+    val uploadMaxBytes: Long,
+    val uploadAdminOnly: Boolean,
+    val extractMaxChars: Int,
+
+    val semanticChunking: Boolean,
+    val chunkMinChars: Int,
+    val chunkMaxChars: Int,
+    val semanticThreshold: Double,
 
     val geminiApiKey: String,
     val geminiModel: String,
@@ -85,7 +93,33 @@ Answering:
 
                 libraryDir = env("LIBRARY_DIR", "/library"),
                 libraryMirror = boolEnv("LIBRARY_MIRROR", true),
-                scanMinutes = env("LIBRARY_SCAN_MINUTES", "5").toLongOrNull() ?: 5L,
+                // One minute: an upload is indexed on the spot, so this cadence
+                // is what catches a file dropped into the folder by hand and a
+                // file deleted from it. An unchanged corpus costs a read and a
+                // hash per file per tick and no API call at all.
+                scanMinutes = env("LIBRARY_SCAN_MINUTES", "1").toLongOrNull() ?: 1L,
+                uploadMaxBytes = (env("UPLOAD_MAX_MB", "25").toLongOrNull() ?: 25L)
+                    .coerceIn(1, 1024) * 1024 * 1024,
+                // The library is one shared corpus: anything uploaded is
+                // searchable by everyone signed in, so writing to it is an
+                // admin act by default. Set UPLOAD_ADMIN_ONLY=off to let every
+                // `use-ui` account add documents.
+                uploadAdminOnly = boolEnv("UPLOAD_ADMIN_ONLY", true),
+                // Tika's ceiling on one document. A 2M-character book is not
+                // refused — its first two million characters are indexed and
+                // the upload says it was cut.
+                extractMaxChars = intEnv("EXTRACT_MAX_CHARS", 2_000_000),
+
+                semanticChunking = boolEnv("SEMANTIC_CHUNKING", true),
+                // The brief's number, and the one worth tuning: below this a
+                // bunch takes the next sentence whatever the similarity says.
+                chunkMinChars = intEnv("CHUNK_MIN_CHARS", 200).coerceIn(50, 4_000),
+                chunkMaxChars = intEnv("CHUNK_MAX_CHARS", 3_000).coerceIn(200, 8_000),
+                // Cosine between the next sentence and the bunch so far. Higher
+                // splits more often; 1.0 would make every sentence its own
+                // chunk if the minimum did not hold them together.
+                semanticThreshold = (env("SEMANTIC_THRESHOLD", "0.75").toDoubleOrNull() ?: 0.75)
+                    .coerceIn(0.0, 1.0),
 
                 geminiApiKey = env("GEMINI_API_KEY"),
                 geminiModel = env("GEMINI_MODEL", "gemini-flash-latest"),

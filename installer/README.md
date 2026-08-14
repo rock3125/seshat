@@ -184,7 +184,7 @@ symptoms are the same cause and `docker-compose.yml` already carries `:z` on
 all three bind mounts to fix it. If you have edited those mounts, put it back:
 
 ```yaml
-- ${LIBRARY_DIR:-./library}:/library:ro,z
+- ${LIBRARY_DIR:-./library}:/library:z
 - ./keycloak/seshat-realm.json:/opt/keycloak/data/import/seshat-realm.json:ro,z
 - ./keycloak/themes:/opt/keycloak/themes:ro,z
 ```

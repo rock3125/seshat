@@ -5,11 +5,16 @@
 // page, and every gateway call carries the resulting access token as a bearer
 // header. Realm roles decide what is allowed:
 //   use-ui  required to use the app at all (the gateway enforces it too)
-//   admin   additionally required to trigger a reindex
+//   admin   additionally required to add documents to the library and to
+//           trigger a reindex
 //
 // The checks here only decide what to render. The gateway verifies the same
 // token signature, issuer, audience and roles server-side, so a user who edits
 // their token gets a 401, not access.
+//
+// Note that the upload button is NOT gated on hasRole() here: the gateway
+// answers `upload.allowed` in GET /config, having applied both the role and
+// UPLOAD_ADMIN_ONLY. One decision, made once, in the place that enforces it.
 
 import Keycloak from 'keycloak-js'
 

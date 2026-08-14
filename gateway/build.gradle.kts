@@ -32,6 +32,16 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.4")
     implementation("com.zaxxer:HikariCP:5.1.0")
 
+    // Apache Tika: everything that is not already text becomes text on its way
+    // into the library. tika-core is the detector and the API; the standard
+    // parser package is the actual format support (PDFBox, POI, the rest) and
+    // it is most of the weight of the image. Its parsers register through
+    // META-INF/services, which the fat jar below concatenates rather than
+    // picks between — without that merge, format support silently narrows to
+    // whichever jar won.
+    implementation("org.apache.tika:tika-core:3.2.1")
+    implementation("org.apache.tika:tika-parsers-standard-package:3.2.1")
+
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-classic:1.5.18")
 

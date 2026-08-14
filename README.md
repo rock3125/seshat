@@ -1,6 +1,6 @@
 # Seshat
 
-Ask a private folder of text files, and get answers cited back to the paragraph
+Ask a private folder of documents, and get answers cited back to the passage
 they came from.
 
 Seshat was the Egyptian goddess of writing, measurement and the record —
@@ -15,8 +15,10 @@ docker compose up -d --build
 open http://localhost:8800/seshat/
 ```
 
-Sign in as **peter@peter.co.nz**. Drop `.txt` or `.md` files into `library/` and
-they are searchable within five minutes.
+Sign in as **peter@peter.co.nz**. Drag documents onto the window — any format:
+PDFs, Word files and spreadsheets are converted to text by Apache Tika on the
+way in, and everything is searchable before the upload finishes. Text files
+dropped into `library/` by hand are picked up within a minute.
 
 ---
 
@@ -41,12 +43,13 @@ defined once in `Tools.kt` and reached two ways: over `POST /mcp` by any MCP
 client, and in-process by the chat agent.
 
 ```
-  library/*.txt
-      │  sha-256 diff, every 5 minutes
-      ▼
-┌───────────────┐  paragraphs ──────────────────────▶ ┌────────────┐
-│ Library scan  │                                     │  Postgres  │  the text
-│               │  dense (Gemini) + sparse (BM25) ──▶ │   Qdrant   │  the vectors
+  upload, any format          library/*.txt
+      │  Tika ──▶ text             │  sha-256 diff, every minute
+      └──────────────┬─────────────┘
+                     ▼
+┌───────────────┐  chunks, min 200 chars ───────────▶ ┌────────────┐
+│  chunk        │  cut where the meaning changes      │  Postgres  │  the text
+│  embed        │  dense (Gemini) + sparse (BM25) ──▶ │   Qdrant   │  the vectors
 └───────────────┘                                     └─────┬──────┘
                                                             │
               ┌──────────── search / load_chunk ────────────┘
@@ -74,11 +77,32 @@ discover the catalogue; `tools/call` needs a Keycloak bearer token with the
 
 ## How retrieval works
 
-**Chunking is the paragraph rule, plus two corrections.** Split on two or more
-consecutive line breaks. Then: runs shorter than 90 characters are glued onto
-the paragraph that follows (a heading alone matches a query and carries no
-answer), and paragraphs over 3,000 characters are cut on sentence boundaries (a
-single vector cannot usefully represent a wall of text about eleven things).
+**Chunking is semantic: the cut goes where the meaning changes.** A document is
+split into sentences, every sentence is embedded, and adjacent sentences are
+bunched while they keep talking about the same thing — cosine similarity between
+the next sentence and the running centroid of the bunch, against
+`SEMANTIC_THRESHOLD` (0.75). The centroid rather than the previous sentence is
+what makes it stable: one short aside inside a passage would drag a pairwise
+comparison across the threshold and split a paragraph that was never going to
+end.
+
+Two bounds keep that from degenerating, and both are in `.env`:
+`CHUNK_MIN_CHARS` (**200**) is a floor a bunch is not allowed to be under — below
+it the next sentence joins whatever the similarity says, because a heading or a
+date line on its own embeds to a vector that retrieves either nothing or
+everything. `CHUNK_MAX_CHARS` (3,000) is a ceiling — a glossary is similar to
+itself all the way down, and without a cap it would be one vector meaning
+nothing in particular.
+
+The cost is an embedding call per sentence at index time on top of the one per
+finished chunk; you cannot know where the meaning turns without embedding both
+sides of the turn. It is paid once per document version. Each document records
+the chunker and settings it was built with, so **changing any of those settings
+re-chunks the corpus on the next scan** rather than leaving it half one shape
+and half another. `SEMANTIC_CHUNKING=off` falls back to the paragraph rule
+(split on blank lines, glue runs under 90 characters onto what follows, cut over
+the maximum at sentence boundaries), which is also what runs if the embedding
+API is unreachable mid-index.
 
 **BM25 is split across the two ends of the query.** Score factors as
 `Σ idf(t) · tf_norm(t, d)`, and Qdrant scores sparse vectors by dot product, so
@@ -91,8 +115,8 @@ existing chunk carries statistics for a corpus that no longer exists.
 **Postgres is the only copy of the text.** Qdrant holds vectors and ids;
 `chunk.id` is also the Qdrant point id, so one integer names a paragraph in both
 stores. The vector index can therefore be dropped and rebuilt from Postgres
-alone — that is what `POST /reindex` does — and no answer ever depends on two
-copies of the same text agreeing.
+alone — that is the second half of `POST /reindex` — and no answer ever depends
+on two copies of the same text agreeing.
 
 **There is no reranker.** A cross-encoder rerank would measurably improve
 ordering, and it needs a local model — the one dependency this build exists to
@@ -100,24 +124,59 @@ avoid. RRF over the two retrievers is the ranking.
 
 ## Where the text comes from
 
-`library/` on the host, mounted read-only. Only text is indexed, and that is
-enforced twice: an allowed extension (`txt`, `md`, `markdown`, `rst`, `log`,
-`csv`, `tsv`, `json`, `yaml`, `adoc`, …), and then a strict UTF-8 decode. The
-second test is the one that matters — a PDF renamed to `.txt` passes the first,
-and would otherwise be indexed as kilobytes of mojibake that pollutes every
-search. Skipped files are logged, not errors.
+`library/` on the host: one text document per file, which is what makes the
+corpus greppable, diffable and re-indexable without anything having to be
+re-parsed.
 
-Each file is hashed; an unchanged file costs a read and a hash on the next scan
-and nothing else. With `LIBRARY_MIRROR=on` (the default) the folder is the
-source of truth: delete a file and its document, chunks and vectors go on the
-next scan.
+**Upload any format.** Apache Tika converts whatever arrives that is not already
+text — PDF, Word, Excel, PowerPoint, OpenDocument, RTF, EPUB, HTML, email — and
+stores the text it found under the same name with `.txt` on the end
+(`report.pdf` → `report.pdf.txt`). A text file is stored byte for byte instead,
+except when it is not valid UTF-8, in which case Tika detects its encoding and
+transcodes it. The original binary is not kept: it is a second copy of a
+document the uploader already has, and it would make every deletion rule reason
+about pairs of files. Two limits worth knowing: layout is discarded (reading
+order, not geometry — the right input for retrieval), and there is no OCR, so a
+scanned page converts to nothing and the upload says so rather than indexing an
+empty document.
+
+Files placed in the folder **by hand** are still text-only, on an extension
+(`txt`, `md`, `markdown`, `rst`, `log`, `csv`, `tsv`, `json`, `yaml`, `adoc`, …)
+and then a strict UTF-8 decode. The second test is the one that matters — a PDF
+renamed to `.txt` passes the first and would otherwise be indexed as kilobytes
+of mojibake that pollutes every search. Skipped files are logged, not errors:
+drop the PDF on the window instead and it is converted.
+
+**The folder is diffed against the index every `LIBRARY_SCAN_MINUTES`, one
+minute by default.** Files that appeared are indexed; files that are gone are
+unindexed, from Postgres and Qdrant both. That cadence is affordable because
+each file is hashed: an unchanged corpus costs a read and a hash per file and no
+API call at all. With `LIBRARY_MIRROR=off` documents accumulate instead and
+nothing is ever dropped.
+
+**Uploads do not wait for a tick.** The rail has an *Add documents* button, and
+a file dropped anywhere on the window does the same thing: it is converted if it
+needs converting, written into `library/`, then chunked, embedded and indexed
+inside the request — so the answer that comes back already says what it was
+converted from and how many chunks it added. Several files go one at a time,
+each with its own verdict in the rail. A name that already exists is replaced
+rather than duplicated — the alternative is `notes.md` and `notes-2.md` both
+matching every future search. Uploading needs the `admin` role unless
+`UPLOAD_ADMIN_ONLY=off`, and `UPLOAD_MAX_MB` (25) caps a single file.
+
+`POST /reindex` runs the same folder pass first — so it picks up anything the
+scanner missed and drops any document whose file is gone, from Qdrant and
+Postgres both — and only then re-embeds every chunk that is left. It has no
+button; it is the repair path for a dropped Qdrant volume, and `curl -X POST`
+with an admin token is its interface.
 
 ## Auth
 
 Keycloak realm `seshat`, imported on first boot from
 `keycloak/seshat-realm.json`. Two realm roles: `use-ui` (required for
 everything, carried by the realm default role so any new account can sign in)
-and `admin` (additionally required for `POST /reindex`).
+and `admin` (additionally required to add documents to the library and to run
+`POST /reindex`).
 
 | User | Email | Password | Roles |
 |---|---|---|---|
@@ -219,7 +278,7 @@ match the query vectors, silently: delete the Qdrant volume and re-index.
 ## Development
 
 ```bash
-cd gateway && ./gradlew test          # chunking + BM25
+cd gateway && ./gradlew test          # chunking, semantic bunching, BM25, upload names
 cd gateway && ./gradlew fatJar        # build/libs/gateway-all.jar
 
 cd ui && npm run dev                  # :5173, proxying /seshat/api to :8090
@@ -265,8 +324,17 @@ Named so it is a decision rather than an omission:
   pleasant side effect that a question is never written to a disk the person
   asking it does not own. The cost: a thread does not follow you to another
   machine, and signing out clears it.
-- **No upload path.** Files arrive by landing in the folder.
-- **No OCR, no Tika, no format conversion.** Text files, as specified.
+- **No delete-from-the-UI.** Documents go in through the UI and come out by
+  deleting the file — the folder stays the source of truth, and one direction of
+  write is a much smaller thing to reason about than two.
+- **No OCR.** Tika reads the text layer of a document; a scanned page has none,
+  and reading it needs Tesseract installed beside the gateway. An upload with no
+  text in it is refused with that as the reason rather than indexed empty.
+- **No conversion on the scan path.** A PDF copied into `library/` by hand is
+  skipped, not converted. Converting it would mean the gateway writing files
+  into the folder nobody asked it to write, and then owning a rule about what
+  happens to the derived text when the original is deleted. Uploads convert;
+  the folder stays what it looks like.
 - **Term hashing, not a dictionary.** BM25 terms hash to 31-bit indices, so
   nothing has to keep a term table in sync between indexing and querying. Two
   terms can collide; at 2³¹ slots against a vocabulary in the tens of thousands

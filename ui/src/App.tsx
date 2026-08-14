@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Composer from './components/Composer'
 import Rail from './components/Rail'
 import SourcesDrawer from './components/SourcesDrawer'
@@ -32,11 +32,23 @@ export default function App() {
       .map((p) => [p.chunk_id, p]),
   ).values()].sort((a, b) => b.score - a.score)
 
-  useEffect(() => {
+  const refreshConfig = useCallback(() => {
     fetchConfig()
-      .then(setConfig)
+      .then((c) => {
+        setConfig(c)
+        setConfigError(null)
+      })
       .catch((e: Error) => setConfigError(e.message))
   }, [])
+
+  // Once at start, then once a minute. The gateway rescans the library folder
+  // on that same cadence, so the counts in the header follow a file dropped
+  // into (or deleted from) the folder by hand without anyone reloading.
+  useEffect(() => {
+    refreshConfig()
+    const timer = window.setInterval(refreshConfig, 60_000)
+    return () => window.clearInterval(timer)
+  }, [refreshConfig])
 
   function ask(prompt: string) {
     void sendMessage(prompt, dispatch, store.getState)
@@ -48,7 +60,11 @@ export default function App() {
     <div
       className={`shell${railOpen ? '' : ' rail-closed'}${drawerOpen ? ' drawer-open' : ''}`}
     >
-      <Rail onNavigate={narrow ? () => dispatch(uiActions.toggleRail()) : undefined} />
+      <Rail
+        onNavigate={narrow ? () => dispatch(uiActions.toggleRail()) : undefined}
+        uploads={config?.upload ?? null}
+        onUploaded={refreshConfig}
+      />
 
       <main className="main">
         <header className="bar">

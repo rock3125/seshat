@@ -127,7 +127,18 @@ services:
 
       LIBRARY_DIR: /library
       LIBRARY_MIRROR: ${LIBRARY_MIRROR:-on}
-      LIBRARY_SCAN_MINUTES: ${LIBRARY_SCAN_MINUTES:-5}
+      LIBRARY_SCAN_MINUTES: ${LIBRARY_SCAN_MINUTES:-1}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-25}
+      UPLOAD_ADMIN_ONLY: ${UPLOAD_ADMIN_ONLY:-on}
+      EXTRACT_MAX_CHARS: ${EXTRACT_MAX_CHARS:-2000000}
+
+      # Chunking. Changing any of these re-chunks the whole corpus on the next
+      # scan — the settings are stamped on each document, and a document whose
+      # stamp no longer matches counts as changed.
+      SEMANTIC_CHUNKING: ${SEMANTIC_CHUNKING:-on}
+      CHUNK_MIN_CHARS: ${CHUNK_MIN_CHARS:-200}
+      CHUNK_MAX_CHARS: ${CHUNK_MAX_CHARS:-3000}
+      SEMANTIC_THRESHOLD: ${SEMANTIC_THRESHOLD:-0.75}
 
       # Fixed in .env, as specified — there is no runtime model switch.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -142,16 +153,25 @@ services:
       KEYCLOAK_ISSUER: ${PUBLIC_URL:-http://localhost:8800}/seshat/auth/realms/seshat
       KEYCLOAK_JWKS_URL: http://keycloak:8810/seshat/auth/realms/seshat/protocol/openid-connect/certs
       KEYCLOAK_AUDIENCE: seshat-ui
+    # Not root. The UI writes uploaded documents into the mounted folder, and a
+    # root-owned container would leave every one of them owned by root on the
+    # HOST — files the person who runs this stack then needs sudo to delete.
+    # 1000:1000 is the first login account on a typical Linux box; set
+    # LIBRARY_UID/LIBRARY_GID to whatever owns the library folder (`id -u`).
+    user: "${LIBRARY_UID:-1000}:${LIBRARY_GID:-1000}"
     volumes:
       # The library folder. Drop .txt/.md files in and they are indexed within
-      # LIBRARY_SCAN_MINUTES. Read-only: the gateway indexes, it never writes.
+      # LIBRARY_SCAN_MINUTES; upload them through the UI and they are indexed
+      # in the request. WRITABLE — it was :ro until uploads existed, and the
+      # gateway still only ever writes files it was handed by an authorised
+      # caller.
       #
       # `z` for the same SELinux reason as the Keycloak mounts above — without
       # it the scanner dies on AccessDeniedException: /library. Note that this
       # RELABELS the host folder (to container_file_t), so point LIBRARY_DIR at
       # a directory of documents, not at a system path you would rather leave
       # labelled as it is.
-      - ${LIBRARY_DIR:-./library}:/library:ro,z
+      - ${LIBRARY_DIR:-./library}:/library:z
     # ports: ["8090:8090"]   # direct access for an MCP client or curl
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
