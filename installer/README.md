@@ -124,11 +124,11 @@ sort it out.
 | Keycloak admin | `https://myserver/seshat/auth/admin/` |
 | Library folder | whatever you passed to `--library` (default `./library`) |
 | Logs | `docker compose logs -f gateway` |
-| Update the corpus | drop `.txt`/`.md` files in the library folder |
+| Update the corpus | drag documents onto the window (any format), or drop `.txt`/`.md` files in the library folder |
 
-The two application users come from `keycloak/seshat-realm.json`:
-`peter@peter.co.nz` / `$DangerMouse` (admin) and `theta@peter.co.nz` / `Theta`.
-**Change both**, in the Keycloak admin console, before this is reachable from
+The application user comes from `keycloak/seshat-realm.json`:
+`peter@peter.co.nz` / `$DangerMouse` (username `rock`, admin). **Change the
+password**, in the Keycloak admin console, before this is reachable from
 anywhere real.
 
 ## Upgrading

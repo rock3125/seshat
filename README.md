@@ -180,13 +180,18 @@ and `admin` (additionally required to add documents to the library and to run
 
 | User | Email | Password | Roles |
 |---|---|---|---|
-| peter | peter@peter.co.nz | `$DangerMouse` | use-ui, admin |
-| theta | theta@peter.co.nz | `Theta` | use-ui |
+| rock | peter@peter.co.nz | `$DangerMouse` | use-ui, admin |
+
+One seeded account, in the `/admins` group. Sign in with either the username or
+the email — `loginWithEmailAllowed` is on. Everyone else is added in the admin
+console; the realm's default role carries `use-ui`, so a new account can sign in
+and search without being granted anything, and needs `admin` only to add
+documents.
 
 The Keycloak admin console is at `/seshat/auth/admin/`. Its password is `admin`
 when you start the stack by hand, and a generated one when `install.sh` sets it
-up (printed at the end of the install, and stored in `.env`). Change the two
-application users' passwords before this is reachable from anywhere real.
+up (printed at the end of the install, and stored in `.env`). Change the seeded
+account's password before this is reachable from anywhere real.
 
 The SPA uses Authorization Code + PKCE as a public client; it never handles a
 password. Every gateway call carries the resulting access token, and the gateway

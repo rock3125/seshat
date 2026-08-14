@@ -434,8 +434,8 @@ td code, th code { background: none; padding: 0; }
       <p class="sub">SESHAT · ARCHITECTURE DIAGRAM</p>
       <h1>Four levels of<br>magnification</h1>
       <p class="thesis">
-        Ask a private folder of text files, and get answers cited back to the
-        paragraph they came from. <b>Five containers, one published port, two
+        Ask a private folder of documents, and get answers cited back to the
+        passage they came from. <b>Five containers, one published port, two
         tools defined once and reached two ways.</b> This document draws that
         shape at four magnifications, then the three runtime paths that make
         it work.
@@ -449,7 +449,8 @@ td code, th code { background: none; padding: 0; }
     <div class="fact"><span class="n">2</span><span class="k">TOOLS</span></div>
     <div class="fact"><span class="n">2</span><span class="k">POSTGRES TABLES</span></div>
     <div class="fact"><span class="n">2</span><span class="k">VECTORS PER CHUNK</span></div>
-    <div class="fact"><span class="n">5<span style="font-size:0.6em"> min</span></span><span class="k">INGESTION POLL</span></div>
+    <div class="fact"><span class="n">1<span style="font-size:0.6em"> min</span></span><span class="k">INGESTION POLL</span></div>
+    <div class="fact"><span class="n">200<span style="font-size:0.6em"> ch</span></span><span class="k">MINIMUM CHUNK</span></div>
   </div>
 </header>
 
@@ -486,9 +487,14 @@ td code, th code { background: none; padding: 0; }
   <div class="body">
     <p>
       The library folder is the whole corpus, and it is a data source rather
-      than a part of the system — it is mounted read only, the gateway indexes
-      it and never writes to it. Gemini is the only external service: one model
-      answers, another embeds.
+      than a part of the system: put a text file in it and the file is the
+      document. The gateway does write to it, in one direction and for one
+      reason — a document uploaded through the browser is converted to text and
+      stored there, so that an uploaded document and a copied-in one are the
+      same thing by the time anything indexes them. Gemini is the only external
+      service: one model answers, another embeds, and with semantic chunking
+      the embedding side is called at index time for every sentence as well as
+      for every finished chunk.
     </p>
     <p>
       The third caller matters structurally. An MCP client — Claude Code, an
@@ -515,7 +521,7 @@ td code, th code { background: none; padding: 0; }
         <rect class="bx" x="20" y="156" width="190" height="72" rx="2"/>
         <text class="tt" x="36" y="184">Administrator</text>
         <text class="ts" x="36" y="204">use-ui + admin</text>
-        <text class="ts" x="36" y="218">may rebuild the index</text>
+        <text class="ts" x="36" y="218">adds documents; rebuilds</text>
 
         <rect class="bx" x="20" y="300" width="190" height="88" rx="2"/>
         <text class="tt" x="36" y="328">MCP client</text>
@@ -538,9 +544,9 @@ td code, th code { background: none; padding: 0; }
         <rect class="bx" x="610" y="104" width="254" height="216" rx="2"/>
         <text class="tt" x="628" y="140">Seshat</text>
         <text class="tl" x="628" y="168">Answers questions from a</text>
-        <text class="tl" x="628" y="184">private folder of text files.</text>
+        <text class="tl" x="628" y="184">private folder of documents.</text>
         <text class="tl" x="628" y="208">Every claim is cited to the</text>
-        <text class="tl" x="628" y="224">paragraph it came from, and</text>
+        <text class="tl" x="628" y="224">passage it came from, and</text>
         <text class="tl" x="628" y="240">a question the library does</text>
         <text class="tl" x="628" y="256">not answer is refused.</text>
         <text class="ts" x="628" y="292">one origin · one path prefix</text>
@@ -554,14 +560,14 @@ td code, th code { background: none; padding: 0; }
         <rect class="bxo" x="980" y="250" width="180" height="84" rx="2"/>
         <text class="tn" x="996" y="276">library/</text>
         <text class="ts" x="996" y="296">a folder on the host</text>
-        <text class="ts" x="996" y="312">.txt .md .csv .json …</text>
+        <text class="ts" x="996" y="312">one text file per document</text>
 
         <!-- arrows -->
         <path class="ln-f" d="M 210 88 L 338 88"/>
         <text class="tl" x="274" y="80" text-anchor="middle">asks; opens citations</text>
 
         <path class="ln-f" d="M 210 192 L 338 192"/>
-        <text class="tl" x="274" y="184" text-anchor="middle">same, plus reindex</text>
+        <text class="tl" x="274" y="184" text-anchor="middle">same, plus uploads</text>
 
         <path class="ln-f" d="M 494 170 L 604 170"/>
         <text class="tl" x="549" y="162" text-anchor="middle">one path only</text>
@@ -574,8 +580,8 @@ td code, th code { background: none; padding: 0; }
         <text class="tl" x="919" y="123" text-anchor="middle">embeddings</text>
 
         <path class="ln" d="M 864 292 L 974 292"/>
-        <text class="tl" x="919" y="270" text-anchor="middle">reads,</text>
-        <text class="tl" x="919" y="283" text-anchor="middle">never writes</text>
+        <text class="tl" x="919" y="270" text-anchor="middle">reads it ·</text>
+        <text class="tl" x="919" y="283" text-anchor="middle">writes uploads</text>
       </svg>
     </div>
     <div class="legend">
@@ -621,8 +627,15 @@ td code, th code { background: none; padding: 0; }
       The two stores split by responsibility rather than by convenience.
       Postgres holds the only copy of the text; Qdrant holds vectors and ids.
       Because <code>chunk.id</code> is also the Qdrant point id, one integer
-      names a paragraph in both, and the vector index can be dropped and
+      names a passage in both, and the vector index can be dropped and
       rebuilt from Postgres alone.
+    </p>
+    <p>
+      Document conversion is <em>in</em> the gateway rather than beside it.
+      Apache Tika is a library, not a service, so an uploaded PDF becomes text
+      in the request thread that received it — no queue, no worker container, no
+      state that can be half-written. It is most of the weight of the image and
+      none of its moving parts, which is the trade this system keeps making.
     </p>
   </div>
 
@@ -658,8 +671,8 @@ td code, th code { background: none; padding: 0; }
         <text class="tt" x="196" y="368">gateway</text>
         <text class="ts" x="196" y="388">one Kotlin fat jar — JDK HttpServer, one virtual thread per request, :8090</text>
         <text class="ts" x="196" y="406">the MCP server AND the chat gateway, in a single process</text>
-        <text class="ts" x="196" y="424">also runs the library scanner on a timer</text>
-        <text class="ti" x="196" y="444">port not published by default — uncomment it to point an MCP client here</text>
+        <text class="ts" x="196" y="424">also the scanner (1 min), Tika conversion and the semantic chunker</text>
+        <text class="ti" x="196" y="444">runs as LIBRARY_UID:LIBRARY_GID, not root, so uploaded files are yours</text>
 
         <!-- stores -->
         <rect class="bx" x="90" y="512" width="250" height="94" rx="2"/>
@@ -682,7 +695,7 @@ td code, th code { background: none; padding: 0; }
 
         <rect class="bxo" x="920" y="440" width="230" height="90" rx="2"/>
         <text class="tn" x="936" y="466">library/ on the host</text>
-        <text class="ts" x="936" y="486">bind mount, :ro</text>
+        <text class="ts" x="936" y="486">bind mount, read-write</text>
         <text class="ts" x="936" y="502">SELinux relabel (z)</text>
 
         <!-- browser -> ui -->
@@ -758,9 +771,9 @@ td code, th code { background: none; padding: 0; }
     <p class="eyebrow">LEVEL THREE · INSIDE THE CONTAINERS</p>
     <h2>One definition, two callers</h2>
     <p class="lede">
-      The gateway's fourteen Kotlin files arrange into two paths that meet at a
-      shared foundation: answering a question, and indexing a file. Both reach
-      the same four components, and ask them opposite things.
+      The gateway's fifteen Kotlin files arrange into two paths that meet at a
+      shared foundation: answering a question, and indexing a document. Both
+      reach the same four components, and ask them opposite things.
     </p>
   </div>
 
@@ -773,6 +786,17 @@ td code, th code { background: none; padding: 0; }
       to drift, so the model answering in the web interface and the model in
       someone's editor see the same tool descriptions and get the same results.
     </p>
+    <p>
+      The indexing side gained two components and kept its shape.
+      <code>Extract.kt</code> is Tika behind one method — bytes and a file name
+      in, text and a media type out — so every caller downstream of it sees a
+      string and does not know or care whether a PDF was involved.
+      <code>Semantic.kt</code> is the chunker: it embeds sentences, bunches them
+      by cosine similarity against the running centroid, and stamps each
+      document with the settings it used. <code>Chunker.kt</code>, the paragraph
+      rule, is still there as the fallback for an embedding API that is not
+      answering — which is why the stamp records which of the two ran.
+    </p>
   </div>
 
   <figure>
@@ -783,16 +807,18 @@ td code, th code { background: none; padding: 0; }
         <text class="tg" x="600" y="66">GATEWAY · ONE FAT JAR, ONE PROCESS</text>
 
         <!-- entry labels -->
-        <text class="ti" x="110" y="26" text-anchor="middle">POST /chat</text>
-        <text class="ti" x="220" y="26" text-anchor="middle">POST /mcp</text>
-        <text class="ti" x="330" y="26" text-anchor="middle">GET /chunk/N</text>
-        <text class="ti" x="440" y="26" text-anchor="middle">GET /config</text>
-        <text class="ti" x="545" y="26" text-anchor="middle">POST /reindex</text>
-        <path class="ln" d="M 110 32 L 110 76"/>
-        <path class="ln" d="M 220 32 L 220 76"/>
-        <path class="ln" d="M 330 32 L 330 76"/>
-        <path class="ln" d="M 440 32 L 440 76"/>
-        <path class="ln" d="M 545 32 L 545 76"/>
+        <text class="ti" x="100" y="26" text-anchor="middle">POST /chat</text>
+        <text class="ti" x="192" y="26" text-anchor="middle">POST /mcp</text>
+        <text class="ti" x="288" y="26" text-anchor="middle">GET /chunk/N</text>
+        <text class="ti" x="382" y="26" text-anchor="middle">GET /config</text>
+        <text class="ti" x="470" y="26" text-anchor="middle">POST /upload</text>
+        <text class="ti" x="556" y="26" text-anchor="middle">POST /reindex</text>
+        <path class="ln" d="M 100 32 L 100 76"/>
+        <path class="ln" d="M 192 32 L 192 76"/>
+        <path class="ln" d="M 288 32 L 288 76"/>
+        <path class="ln" d="M 382 32 L 382 76"/>
+        <path class="ln" d="M 470 32 L 470 76"/>
+        <path class="ln" d="M 556 32 L 556 76"/>
 
         <!-- Http -->
         <rect class="bx" x="56" y="78" width="520" height="60" rx="2"/>
@@ -828,8 +854,8 @@ td code, th code { background: none; padding: 0; }
         <!-- Library -->
         <rect class="bx" x="676" y="182" width="210" height="64" rx="2"/>
         <text class="tt" x="692" y="206">Library.kt</text>
-        <text class="ts" x="692" y="224">scan on boot, then</text>
-        <text class="ts" x="692" y="238">every minute · sha-256</text>
+        <text class="ts" x="692" y="224">scan every minute · sha-256</text>
+        <text class="ts" x="692" y="238">+ chunker stamp · uploads</text>
         <path class="ln" d="M 760 138 L 760 176"/>
         <text class="tl" x="770" y="154">POST</text>
         <text class="ti" x="770" y="168">/upload · /reindex</text>
@@ -848,13 +874,13 @@ td code, th code { background: none; padding: 0; }
         <text class="tl" x="48" y="250">MCP</text>
         <text class="ti" x="48" y="264">tools/call</text>
 
-        <!-- Chunker -->
+        <!-- Extract (Tika) + the semantic chunker; Chunker.kt is the fallback -->
         <rect class="bx" x="676" y="286" width="210" height="64" rx="2"/>
-        <text class="tt" x="692" y="310">Semantic.kt · Extract.kt</text>
-        <text class="ts" x="692" y="328">Tika in, sentences bunched</text>
-        <text class="ts" x="692" y="342">by cosine · min 200 chars</text>
+        <text class="tt" x="692" y="310">Extract · Semantic</text>
+        <text class="ts" x="692" y="328">Tika: any format → text</text>
+        <text class="ts" x="692" y="342">cosine bunching · min 200</text>
         <path class="ln-d" d="M 760 246 L 760 280"/>
-        <text class="ti" x="770" y="268">decoded text</text>
+        <text class="ti" x="770" y="268">text → chunks</text>
 
         <!-- spines -->
         <path class="ln-p" style="stroke:var(--faience);stroke-width:1.7" d="M 156 350 L 156 366 M 105 366 L 715 366"/>
@@ -965,7 +991,7 @@ td code, th code { background: none; padding: 0; }
         <text class="tg" x="30" y="158">A QUESTION, GOING OUT</text>
         <rect class="bx" x="30" y="172" width="210" height="62" rx="2"/>
         <text class="tn" x="44" y="196">App.tsx · Composer</text>
-        <text class="ts" x="44" y="216">Rail · Transcript · Sources</text>
+        <text class="ts" x="44" y="216">Rail · Transcript · Uploader</text>
 
         <rect class="bx" x="360" y="172" width="210" height="62" rx="2"/>
         <text class="tn" x="374" y="196">chatStream.ts</text>
@@ -1028,6 +1054,11 @@ td code, th code { background: none; padding: 0; }
       The stream is read with <code>fetch</code> and a stream reader rather
       than <code>EventSource</code>, which is GET-only and reconnects by
       itself; this needs a POST body and a turn that ends when it ends.
+      <code>Uploader</code> is the one component that does not touch this
+      machinery at all: it holds its own queue in a ref, sends one plain
+      <code>fetch</code> per file, and keeps nothing — a list of what happened
+      in the last few minutes is not state the application needs to survive a
+      reload.
     </figcaption>
   </figure>
 </section>
@@ -1209,6 +1240,14 @@ td code, th code { background: none; padding: 0; }
         <text class="tn" x="156" y="54">library/ — walked on boot,</text>
         <text class="tn" x="156" y="72">then every minute</text>
 
+        <!-- the other entrance: an upload arrives as a file in the same folder,
+             having been through Tika, and does not wait for a tick. -->
+        <rect class="bx2" x="520" y="24" width="380" height="68" rx="2"/>
+        <text class="tg" x="534" y="46">POST /UPLOAD — ANY FORMAT</text>
+        <text class="ts" x="534" y="66">Tika turns it into text, the text is written here as a</text>
+        <text class="ts" x="534" y="82">file, and the rest of this path runs inside the request</text>
+        <path class="ln-f" d="M 514 58 L 446 58"/>
+
         <path class="ln-f" d="M 290 86 L 290 110"/>
 
         <rect class="bx" x="140" y="112" width="300" height="56" rx="2"/>
@@ -1217,19 +1256,19 @@ td code, th code { background: none; padding: 0; }
         <path class="ln-t" d="M 440 140 L 514 140"/>
         <text class="ti" x="477" y="132" text-anchor="middle">no</text>
         <rect class="bxo" x="520" y="118" width="380" height="44" rx="2"/>
-        <text class="ts" x="534" y="136">skipped, and logged — a stray image in a</text>
-        <text class="ts" x="534" y="152">library folder is normal, not a fault</text>
+        <text class="ts" x="534" y="136">skipped, and logged. Nothing is converted HERE —</text>
+        <text class="ts" x="534" y="152">upload the PDF instead and Tika reads it</text>
 
         <path class="ln-f" d="M 290 168 L 290 192"/>
 
         <rect class="bx" x="140" y="194" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="218">sha-256 == document.sha256?</text>
+        <text class="tn" x="156" y="218">same sha-256 AND same chunker?</text>
         <text class="ts" x="156" y="238">the registry the scanner diffs against</text>
         <path class="ln-t" d="M 440 222 L 514 222"/>
         <text class="ti" x="477" y="214" text-anchor="middle">yes</text>
         <rect class="bxo" x="520" y="200" width="380" height="44" rx="2"/>
-        <text class="ts" x="534" y="218">unchanged — a read and a hash. No writes,</text>
-        <text class="ts" x="534" y="234">no embedding call. This is why a poll suffices.</text>
+        <text class="ts" x="534" y="218">unchanged — a read and a hash. No writes, no</text>
+        <text class="ts" x="534" y="234">embedding call. This is why a poll suffices.</text>
 
         <path class="ln-f" d="M 290 250 L 290 274"/>
 
@@ -1247,6 +1286,14 @@ td code, th code { background: none; padding: 0; }
         <rect class="bx" x="140" y="358" width="300" height="56" rx="2"/>
         <text class="tn" x="156" y="382">Semantic chunking — cosine bunching</text>
         <text class="ts" x="156" y="402">min 200 chars · max 3000 · threshold 0.75</text>
+
+        <path class="hair" d="M 440 386 L 514 386"/>
+        <rect class="bx2" x="520" y="352" width="380" height="106" rx="2"/>
+        <text class="tg" x="534" y="374">TWO EMBEDDING PASSES, ON PURPOSE</text>
+        <text class="ts" x="534" y="396">Every sentence is embedded to find the boundaries,</text>
+        <text class="ts" x="534" y="412">then every finished chunk is embedded to be stored.</text>
+        <text class="ts" x="534" y="428">You cannot know where the meaning turns without</text>
+        <text class="ts" x="534" y="444">having embedded both sides of the turn.</text>
 
         <path class="ln-f" d="M 290 414 L 290 438"/>
 
@@ -1286,8 +1333,9 @@ td code, th code { background: none; padding: 0; }
         <!-- mirror branch -->
         <path class="hair" d="M 140 786 L 900 786"/>
         <text class="tg" x="140" y="812">LIBRARY_MIRROR = ON (THE DEFAULT) — THE FOLDER IS THE SOURCE OF TRUTH</text>
-        <text class="ts" x="140" y="834">A path registered in `document` that no file matched on this scan is removed:</text>
-        <text class="ts" x="140" y="850">the document row, its chunks (by cascade), and its points in Qdrant.</text>
+        <text class="ts" x="140" y="834">A path registered in `document` that no file matched on this scan is removed — the document row, its</text>
+        <text class="ts" x="140" y="850">chunks (by cascade), and its points in Qdrant. Qdrant first: its points are keyed by document_id, and</text>
+        <text class="ts" x="140" y="866">would be unreachable orphans if the row went first and the vector delete then failed.</text>
       </svg>
     </div>
     <div class="legend">
@@ -1295,16 +1343,17 @@ td code, th code { background: none; padding: 0; }
       <span><i class="key-t"></i>the file drops out here</span>
     </div>
     <figcaption>
-      <b>Text only on disk — but not text only on the way in.</b> This is the
-      SCAN path, where the extension allowlist is the cheap test and the strict
-      decode is the one that matters: without it a mislabelled binary is indexed
-      as kilobytes of mojibake that pollutes every subsequent search. An upload
-      arrives at the same pipeline one step earlier, through Tika, which turns a
-      PDF or a Word file into the text this path then indexes. The average chunk
-      length that BM25 normalises
-      against is computed once per scan rather than once per document, so a
-      document's length normalisation does not depend on how many files
-      happened to be processed before it.
+      <b>Two entrances, one pipeline.</b> An upload joins at the top, having
+      already been through Tika; a file copied into the folder joins the same
+      spine on the next tick and has to pass the two tests first. The extension
+      allowlist is the cheap one and the strict decode is the one that matters:
+      without it a mislabelled binary is indexed as kilobytes of mojibake that
+      pollutes every subsequent search. Note what the hash test compares now —
+      the bytes AND the chunker signature, so changing <code>CHUNK_MIN_CHARS</code>
+      re-chunks a corpus whose files nobody touched. The average chunk length
+      that BM25 normalises against is computed once per scan rather than once
+      per document, so a document's length normalisation does not depend on how
+      many files happened to be processed before it.
     </figcaption>
   </figure>
 
@@ -1389,8 +1438,8 @@ td code, th code { background: none; padding: 0; }
       <tbody>
         <tr><td><code>/chat</code></td><td>POST</td><td>use-ui</td><td>One chat turn as Server-Sent Events: <code>token</code>, <code>tool_call</code>, <code>tool_result</code>, <code>done</code>, <code>error</code>.</td></tr>
         <tr><td><code>/mcp</code></td><td>POST</td><td>use-ui, for <code>tools/call</code> only</td><td>MCP Streamable HTTP — one JSON-RPC message in, one out. <code>initialize</code>, <code>ping</code> and <code>tools/list</code> answer unauthenticated so a client can discover the catalogue.</td></tr>
-        <tr><td><code>/chunk/N</code></td><td>GET</td><td>use-ui</td><td>One paragraph plus <code>?around=</code> neighbours, unwrapped from the tool shape into plain JSON. What a citation opens.</td></tr>
-        <tr><td><code>/config</code></td><td>GET</td><td>use-ui</td><td>Model name, document and chunk counts, corpus size, whether chat is enabled, and the upload rules this caller is subject to (allowed, size cap, extensions).</td></tr>
+        <tr><td><code>/chunk/N</code></td><td>GET</td><td>use-ui</td><td>One passage plus <code>?around=</code> neighbours, unwrapped from the tool shape into plain JSON. What a citation opens.</td></tr>
+        <tr><td><code>/config</code></td><td>GET</td><td>use-ui</td><td>Model name, document and chunk counts, corpus size, the scan cadence, whether chat is enabled, and the upload rules THIS caller is subject to — may they upload, how large, and whether the gateway converts (which is what tells the file picker to stop filtering by extension).</td></tr>
         <tr><td><code>/upload</code></td><td>POST</td><td>admin, unless <code>UPLOAD_ADMIN_ONLY=off</code></td><td>One file of any format: <code>?name=</code> plus the bytes as the body. Anything that is not already text goes through Tika and is stored as <code>&lt;name&gt;.txt</code>; then it is chunked, embedded and indexed inside the request, so the response carries the chunk count and what it was converted from. A name that exists is replaced.</td></tr>
         <tr><td><code>/reindex</code></td><td>POST</td><td>admin</td><td>A full folder pass — index what is new, unindex what is gone — and then re-embed every chunk from Postgres. Returns <code>202</code> and runs in the background.</td></tr>
         <tr><td><code>/health</code></td><td>GET</td><td>none</td><td><code>200</code> only after a real round trip to both stores has succeeded.</td></tr>
@@ -1408,12 +1457,12 @@ td code, th code { background: none; padding: 0; }
         <tr>
           <td><code>search</code></td>
           <td><code>query</code> · <code>mode</code> (hybrid | dense | keyword) · <code>top_k</code> 1–25, default 6</td>
-          <td>Best paragraphs with <code>chunk_id</code>, <code>document_id</code>, title, path, ordinal, score and text. Hybrid fuses BM25 and dense similarity server-side with reciprocal rank fusion.</td>
+          <td>Best passages with <code>chunk_id</code>, <code>document_id</code>, title, path, ordinal, score and text. Hybrid fuses BM25 and dense similarity server-side with reciprocal rank fusion.</td>
         </tr>
         <tr>
           <td><code>load_chunk</code></td>
           <td><code>chunk_id</code> · <code>before</code> 0–10 · <code>after</code> 0–10</td>
-          <td>One paragraph, optionally with neighbours from the same document. Ordinals are contiguous, so the window is a range and Postgres clamps it at the document's edges by returning fewer rows.</td>
+          <td>One passage, optionally with neighbours from the same document. Ordinals are contiguous, so the window is a range and Postgres clamps it at the document's edges by returning fewer rows.</td>
         </tr>
       </tbody>
     </table>
@@ -1444,7 +1493,8 @@ td code, th code { background: none; padding: 0; }
       <tbody>
         <tr><td><code>PUBLIC_URL</code></td><td><code>http://localhost:8800</code></td><td>The origin the <em>browser</em> uses. It becomes the token issuer, so it must match exactly or every token is rejected.</td></tr>
         <tr><td><code>EMBED_DIMS</code></td><td class="num-col">768</td><td>Index-breaking. Changing it means stored vectors no longer match query vectors, silently — drop the Qdrant volume and re-index.</td></tr>
-        <tr><td><code>LIBRARY_MIRROR</code></td><td><code>on</code></td><td>On, the folder is the source of truth and deletions propagate. Off, documents accumulate and are only ever updated.</td></tr>
+        <tr><td><code>LIBRARY_MIRROR</code></td><td><code>on</code></td><td>On, the folder is the source of truth and deletions propagate. Off, documents accumulate and are only ever updated — and a reindex does not prune either.</td></tr>
+        <tr><td><code>LIBRARY_UID</code> · <code>LIBRARY_GID</code></td><td class="num-col">1000</td><td>The gateway drops to this uid:gid, because it now writes uploaded documents into a folder on your disk. As root it would leave every one of them owned by root. Set it to whatever owns the library folder.</td></tr>
         <tr><td><code>LIBRARY_SCAN_MINUTES</code></td><td class="num-col">1</td><td>How often the folder is diffed against the index — how long a file copied in by hand waits, and how long a deleted one stays searchable. An upload through the UI is indexed in the request and waits for nothing.</td></tr>
         <tr><td><code>UPLOAD_MAX_MB</code></td><td class="num-col">25</td><td>Per uploaded file. nginx's <code>client_max_body_size</code> must be at or above it, or its HTML 413 reaches the UI instead of the gateway's JSON.</td></tr>
         <tr><td><code>UPLOAD_ADMIN_ONLY</code></td><td><code>on</code></td><td>The library is one shared corpus, so adding to it is an admin act by default. Off lets every <code>use-ui</code> account upload.</td></tr>

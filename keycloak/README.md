@@ -39,10 +39,14 @@ flow.
 
 | Username | Email | Password | Group | Roles |
 |---|---|---|---|---|
-| peter | peter@peter.co.nz | `$DangerMouse` | /admins | use-ui, admin |
-| theta | theta@peter.co.nz | `Theta` | /readers | use-ui |
+| rock | peter@peter.co.nz | `$DangerMouse` | /admins | use-ui, admin |
 
 Sign in with either the username or the email — `loginWithEmailAllowed` is on.
+
+One seeded account. The `/readers` group still exists and still carries nothing
+but `use-ui`, which is what a second account would be put in: `use-ui` is on the
+realm's default role, so the group is a place to put people rather than a way to
+grant them anything, and `/admins` is the one that adds `admin`.
 
 ## Adding a deployment host
 
