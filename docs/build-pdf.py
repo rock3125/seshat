@@ -16,9 +16,27 @@ searchable text in the PDF.
 
 import argparse
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
+
+
+def sheet_colour(fragment: str) -> str:
+    """
+    The paper colour, as Chrome's --default-background-color wants it.
+
+    Read out of the document's own `--ground` token rather than written down
+    here, so the sheet cannot drift away from the page it surrounds. The flag
+    takes RRGGBBAA — alpha LAST, which is worth stating because passing an
+    ARGB value the other way round is accepted silently and prints a document
+    on pink paper.
+    """
+    found = re.search(r"--ground:\s*#([0-9A-Fa-f]{3,8})", fragment)
+    hex_ = found.group(1) if found else "E7E8E3"
+    if len(hex_) == 3:
+        hex_ = "".join(c * 2 for c in hex_)
+    return f"{hex_[:6].upper()}FF"
 
 # NOTE: this string is injected into a <style> element. It must not contain a
 # closing style tag, and — learned the hard way — nothing here should be
@@ -42,6 +60,11 @@ html, body { background: var(--ground); }
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+
+  /* NOTE: this colours the page AREA only. The @page margin box belongs to no
+     element and cannot be painted from CSS — not by html, not by a fixed
+     backdrop, which Chrome clips to the page area. The sheet itself is set
+     with --default-background-color on the command line; see SHEET below. */
 
   /* The figure containers scroll on screen. In print, overflow is clipped
      rather than scrolled, so a wide diagram would silently lose its right
@@ -130,10 +153,17 @@ def main() -> int:
         encoding="utf-8",
     )
 
+    # The sheet. CSS can only reach the page area, so the strip of paper inside
+    # the @page margins comes from the browser's own canvas colour — without
+    # this the pages print as an off-white block on a white border, which reads
+    # as a mistake rather than as a document.
+    sheet = sheet_colour(fragment)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         chromium, "--headless=new", "--disable-gpu", "--no-sandbox",
         "--no-first-run", "--hide-scrollbars", "--force-color-profile=srgb",
+        f"--default-background-color={sheet}",
         "--run-all-compositor-stages-before-draw",
         "--virtual-time-budget=20000", "--no-pdf-header-footer",
         f"--print-to-pdf={out}", work.as_uri(),
@@ -143,7 +173,7 @@ def main() -> int:
         print(res.stdout + res.stderr, file=sys.stderr)
         return res.returncode or 1
 
-    print(f"{out}  ({out.stat().st_size:,} bytes, {args.size})")
+    print(f"{out}  ({out.stat().st_size:,} bytes, {args.size}, sheet #{sheet[:6]})")
     return 0
 
 
