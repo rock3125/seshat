@@ -4,9 +4,9 @@ import Mark from './Mark'
 import type { Conversation, ServerConfig } from '../types'
 
 const OPENERS = [
-  { tag: 'Ask', ask: 'What does the library say about this?' },
+  { tag: 'Ask', ask: 'What does the library say about Seshat?' },
   { tag: 'Summarise', ask: 'Summarise the main points across every document.' },
-  { tag: 'Locate', ask: 'Which document covers this, and where in it?' },
+  { tag: 'Locate', ask: 'Which document covers Seshat, and where in it?' },
   { tag: 'Compare', ask: 'Where do the documents disagree with each other?' },
 ]
 

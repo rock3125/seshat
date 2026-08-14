@@ -173,7 +173,18 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   padding: 0.875rem 0.875rem 0.75rem;
 }
 
-.lockup { display: flex; align-items: center; gap: 0.625rem; min-width: 0; }
+/* The wordmark is a logo that happens to be set in type, so it does not behave
+   like text: no selection, no drag-select smear across it on the way to the
+   thread list, and the pointer stays an arrow rather than an I-beam. */
+.lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
 .lockup .glyph { width: 30px; height: 30px; flex: none; color: var(--ink); }
 
 .wordmark {

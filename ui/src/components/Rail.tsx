@@ -24,7 +24,11 @@ export default function Rail({
   return (
     <aside className="rail">
       <div className="rail-head">
-        <div className="lockup">
+        {/* The title sits on the lockup rather than on either half, so the
+            mark and the wordmark show one tooltip between them — they are one
+            thing. The SVG's own `title` prop stays what it was: an aria-label,
+            which a tooltip is not a substitute for. */}
+        <div className="lockup" title="Seshat · Mistress of the House of Books">
           <Mark className="glyph" title="Seshat" />
           <span className="wordmark">
             SE<span className="dot">·</span>SHAT
