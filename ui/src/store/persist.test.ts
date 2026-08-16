@@ -14,14 +14,19 @@ import { conversationsActions } from './conversationsSlice'
  * that the last state still always reaches disk. A throttle that dropped the
  * trailing write would lose the end of every answer.
  */
+/** Inferred through a helper rather than annotated: `ReturnType<typeof
+ *  vi.spyOn>` resolves to `any` on an unapplied generic, which silently turns
+ *  off type checking for every assertion made through the spy. */
+const spyOnSetItem = () => vi.spyOn(Storage.prototype, 'setItem')
+
 describe('state persistence', () => {
-  let setItem: ReturnType<typeof vi.spyOn>
+  let setItem: ReturnType<typeof spyOnSetItem>
   let store: typeof import('./index').store
 
   beforeEach(async () => {
     vi.useFakeTimers()
     store = (await import('./index')).store
-    setItem = vi.spyOn(Storage.prototype, 'setItem')
+    setItem = spyOnSetItem()
   })
 
   afterEach(() => {
@@ -56,7 +61,7 @@ describe('state persistence', () => {
     token('the answer')
     vi.advanceTimersByTime(250)
 
-    const [key, value] = setItem.mock.calls[0] as [string, string]
+    const [key, value] = setItem.mock.calls[0]
     expect(key).toBe('seshat-state')
     // The trailing write is the one that matters: it carries the newest state,
     // so the end of an answer is never the part that is lost.
@@ -82,7 +87,7 @@ describe('state persistence', () => {
     // A tab closed mid-answer would otherwise lose up to the whole interval.
     window.dispatchEvent(new Event('pagehide'))
     expect(setItem).toHaveBeenCalledTimes(1)
-    expect((setItem.mock.calls[0] as [string, string])[1]).toContain('mid-answer')
+    expect(setItem.mock.calls[0][1]).toContain('mid-answer')
   })
 
   it('does not write twice when a flush follows a pending interval', () => {

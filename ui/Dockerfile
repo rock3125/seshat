@@ -1,6 +1,8 @@
 # Build the SPA, then serve it — and reverse-proxy the gateway and Keycloak —
 # from one nginx. One container is the public entrance for the whole stack, so
 # the browser only ever talks to one origin.
+# node:22-alpine, not an older tag: Vite 8 requires ^20.19 || >=22.12, which is
+# declared in package.json's `engines`.
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./

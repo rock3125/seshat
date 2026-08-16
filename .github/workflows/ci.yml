@@ -63,6 +63,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
+          # Vite 8 requires ^20.19 || >=22.12 (see `engines` in package.json).
+          # '22' resolves to the latest 22.x, which is comfortably past that
+          # floor — but the floor is real now, so it is worth naming.
           node-version: '22'
           cache: npm
           cache-dependency-path: ui/package-lock.json
