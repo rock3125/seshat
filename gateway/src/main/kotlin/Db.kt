@@ -81,21 +81,39 @@ class Db(cfg: Config) : AutoCloseable {
     data class DocRow(
         val id: Long, val path: String, val title: String,
         val sha256: String, val chunkCount: Int, val chunker: String,
+        /** File size and last-modified time as they were when this row was
+         *  written — the scanner's fast path, see Library.indexOne. */
+        val bytes: Long, val mtime: Long,
+    )
+
+    private val documentColumns =
+        "select id, path, title, sha256, chunk_count, chunker, bytes, mtime from document"
+
+    private fun ResultSet.toDoc() = DocRow(
+        id = getLong("id"), path = getString("path"), title = getString("title"),
+        sha256 = getString("sha256"), chunkCount = getInt("chunk_count"),
+        chunker = getString("chunker") ?: "",
+        bytes = getLong("bytes"), mtime = getLong("mtime"),
     )
 
     /** Every document currently registered, by relative path. */
     fun documents(): Map<String, DocRow> = read { c ->
-        c.prepareStatement("select id, path, title, sha256, chunk_count, chunker from document").use { st ->
+        c.prepareStatement(documentColumns).use { st ->
             st.executeQuery().use { rs ->
-                buildMap {
-                    while (rs.next()) {
-                        put(rs.getString("path"),
-                            DocRow(rs.getLong("id"), rs.getString("path"),
-                                rs.getString("title"), rs.getString("sha256"),
-                                rs.getInt("chunk_count"), rs.getString("chunker") ?: ""))
-                    }
-                }
+                buildMap { while (rs.next()) put(rs.getString("path"), rs.toDoc()) }
             }
+        }
+    }
+
+    /** One document by its relative path.
+     *
+     *  An upload needs exactly one row, and reaching it through [documents] —
+     *  which is what it used to do — meant reading the whole registry to look
+     *  at one line of it, on every single upload. */
+    fun document(path: String): DocRow? = read { c ->
+        c.prepareStatement("$documentColumns where path = ?").use { st ->
+            st.setString(1, path)
+            st.executeQuery().use { rs -> if (rs.next()) rs.toDoc() else null }
         }
     }
 
@@ -110,22 +128,24 @@ class Db(cfg: Config) : AutoCloseable {
      * down the file is a different chunk in every way that matters here.
      */
     fun replaceDocument(
-        path: String, title: String, sha256: String, bytes: Long,
+        path: String, title: String, sha256: String, bytes: Long, mtime: Long,
         chunks: List<Chunker.Chunk>, chunker: String,
     ): Pair<Long, List<Long>> = tx { c ->
         val docId = c.prepareStatement(
             """
-            insert into document (path, title, sha256, bytes, chunk_count, chunker, indexed_at)
-            values (?, ?, ?, ?, ?, ?, now())
+            insert into document (path, title, sha256, bytes, mtime, chunk_count, chunker, indexed_at)
+            values (?, ?, ?, ?, ?, ?, ?, now())
             on conflict (path) do update
               set title = excluded.title, sha256 = excluded.sha256,
-                  bytes = excluded.bytes, chunk_count = excluded.chunk_count,
+                  bytes = excluded.bytes, mtime = excluded.mtime,
+                  chunk_count = excluded.chunk_count,
                   chunker = excluded.chunker, indexed_at = now()
             returning id
             """,
         ).use { st ->
             st.setString(1, path); st.setString(2, title); st.setString(3, sha256)
-            st.setLong(4, bytes); st.setInt(5, chunks.size); st.setString(6, chunker)
+            st.setLong(4, bytes); st.setLong(5, mtime)
+            st.setInt(6, chunks.size); st.setString(7, chunker)
             st.executeQuery().use { rs -> rs.next(); rs.getLong(1) }
         }
 
@@ -133,17 +153,53 @@ class Db(cfg: Config) : AutoCloseable {
             st.setLong(1, docId); st.executeUpdate()
         }
 
-        val ids = ArrayList<Long>(chunks.size)
-        c.prepareStatement(
-            "insert into chunk (document_id, ordinal, text, tokens) values (?, ?, ?, ?) returning id",
-        ).use { st ->
-            for (ch in chunks) {
-                st.setLong(1, docId); st.setInt(2, ch.ordinal)
-                st.setString(3, ch.text); st.setInt(4, ch.tokens)
-                st.executeQuery().use { rs -> rs.next(); ids.add(rs.getLong(1)) }
+        // One statement per BATCH of chunks, not per chunk. A 300-paragraph
+        // document was 300 sequential round trips inside the transaction; a
+        // multi-row insert makes it a handful. The batches are bounded because
+        // Postgres caps a statement at 65535 bind parameters and this binds
+        // four per chunk — 4000 rows is comfortably inside that and keeps any
+        // one statement a sane size.
+        // RETURNING is read back BY ORDINAL rather than by row order. Postgres
+        // does emit the rows in the order the VALUES were written, but that is
+        // not a guarantee the documentation makes — and the caller pairs these
+        // ids with chunk texts to build the vectors, so a reordering here would
+        // silently attach every paragraph's embedding to the wrong paragraph.
+        // The ordinal is already unique within the document; using it costs one
+        // map and removes the assumption entirely.
+        val byOrdinal = HashMap<Int, Long>(chunks.size)
+        for (batch in chunks.chunked(4_000)) {
+            val values = batch.joinToString(",") { "(?, ?, ?, ?)" }
+            c.prepareStatement(
+                "insert into chunk (document_id, ordinal, text, tokens) " +
+                    "values $values returning id, ordinal",
+            ).use { st ->
+                var p = 1
+                for (ch in batch) {
+                    st.setLong(p++, docId); st.setInt(p++, ch.ordinal)
+                    st.setString(p++, ch.text); st.setInt(p++, ch.tokens)
+                }
+                st.executeQuery().use { rs ->
+                    while (rs.next()) byOrdinal[rs.getInt("ordinal")] = rs.getLong("id")
+                }
             }
         }
+        val ids = chunks.map {
+            byOrdinal[it.ordinal] ?: error("no id returned for ordinal ${it.ordinal} of $path")
+        }
         docId to ids
+    }
+
+    /** Record the file's current size and mtime without touching its chunks.
+     *
+     *  For a file whose CONTENT is unchanged but whose stat is not — touched,
+     *  copied, or indexed before mtime was recorded at all. Re-embedding it
+     *  would be pure waste; leaving the stat stale would mean hashing it again
+     *  on every tick for ever. */
+    fun touchDocument(id: Long, bytes: Long, mtime: Long) = tx { c ->
+        c.prepareStatement("update document set bytes = ?, mtime = ? where id = ?").use { st ->
+            st.setLong(1, bytes); st.setLong(2, mtime); st.setLong(3, id)
+            st.executeUpdate()
+        }
     }
 
     fun deleteDocument(id: Long) = tx { c ->
@@ -298,8 +354,11 @@ class Db(cfg: Config) : AutoCloseable {
                 unique (document_id, ordinal)
             );
 
-            create index if not exists chunk_document_ordinal_idx
-                on chunk (document_id, ordinal);
+            -- `unique (document_id, ordinal)` above already builds a btree on
+            -- exactly these columns, so the index that used to be declared here
+            -- was a second copy of it: paid for on every insert, read by
+            -- nothing the first one could not answer.
+            drop index if exists chunk_document_ordinal_idx;
 
             -- Which chunker produced this document's chunks, and with what
             -- settings. A file whose bytes are unchanged but whose chunker
@@ -309,6 +368,14 @@ class Db(cfg: Config) : AutoCloseable {
             -- the CREATE above: the table already exists on every deployment
             -- that predates semantic chunking.
             alter table document add column if not exists chunker text not null default '';
+
+            -- The file's last-modified time in epoch millis, as it was when
+            -- this row was written. With `bytes` it is the scanner's fast path:
+            -- a file whose size and mtime both match what was indexed is not
+            -- opened at all (see Library.indexOne). Defaulting to 0 means every
+            -- pre-existing row misses that test once and is hashed exactly one
+            -- more time, which is the safe direction to be wrong in.
+            alter table document add column if not exists mtime bigint not null default 0;
         """.trimIndent()
     }
 }

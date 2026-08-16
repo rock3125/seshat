@@ -6,6 +6,9 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import kotlin.math.sqrt
 
 /**
@@ -49,9 +52,49 @@ class Embeddings(private val cfg: Config) {
 
     val dimensions: Int get() = cfg.embedDims
 
-    /** Vectors for text being INDEXED. Order matches the input. */
-    fun documents(texts: List<String>): List<FloatArray> =
-        texts.chunked(batchSize).flatMap { batch -> embed(batch, "RETRIEVAL_DOCUMENT") }
+    /**
+     * Vectors for text being INDEXED. Order matches the input.
+     *
+     * The batches go out concurrently, up to EMBED_CONCURRENCY at a time. They
+     * used to go one after another, which made indexing wall-clock a straight
+     * multiple of the number of batches — a 10,000-chunk reindex is 313 of
+     * them, and every one was a full round trip to Google spent waiting. Each
+     * batch is independent, so the only thing serialising them was the loop.
+     *
+     * The cap is a real limit, not a formality: the embedding API rate-limits
+     * per key, and firing 313 requests at once earns 429s that [withRetry] then
+     * backs off from, which is slower than not having sent them.
+     */
+    fun documents(texts: List<String>): List<FloatArray> {
+        val batches = texts.chunked(batchSize)
+        if (batches.size <= 1) return batches.flatMap { embed(it, "RETRIEVAL_DOCUMENT") }
+
+        val gate = Semaphore(cfg.embedConcurrency.coerceAtLeast(1))
+        // One virtual thread per batch, all parked on the semaphore: the
+        // threads are free, the permits are what does the limiting.
+        return Executors.newVirtualThreadPerTaskExecutor().use { pool ->
+            val futures = batches.map { batch ->
+                pool.submit<List<FloatArray>> {
+                    gate.acquire()
+                    try {
+                        embed(batch, "RETRIEVAL_DOCUMENT")
+                    } finally {
+                        gate.release()
+                    }
+                }
+            }
+            // Indexed in submission order, so the result is in input order
+            // whatever order the responses actually arrived in — which is the
+            // property Library depends on to pair vectors with chunk ids.
+            futures.flatMap { future ->
+                try {
+                    future.get()
+                } catch (e: ExecutionException) {
+                    throw e.cause ?: e
+                }
+            }
+        }
+    }
 
     /** The vector for text being SEARCHED WITH. */
     fun query(text: String): FloatArray = embed(listOf(text), "RETRIEVAL_QUERY").first()
@@ -116,7 +159,7 @@ class Embeddings(private val cfg: Config) {
                 last = e
             }
             log.warn("{} failed (attempt {}), retrying in {}ms: {}",
-                what, attempt + 1, delayMs, last?.message?.take(160))
+                what, attempt + 1, delayMs, last.message?.take(160))
             Thread.sleep(delayMs)
             delayMs = (delayMs * 2).coerceAtMost(30_000)
         }

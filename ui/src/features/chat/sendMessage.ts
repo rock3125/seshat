@@ -1,6 +1,7 @@
 import { nanoid } from '@reduxjs/toolkit'
 import { streamChat, type HistoryMessage } from '../../api/chatStream'
 import { conversationsActions } from '../../store/conversationsSlice'
+import { num, str } from '../../json'
 import type { AppDispatch, RootState } from '../../store'
 import type { Passage } from '../../types'
 
@@ -83,9 +84,9 @@ export async function sendMessage(
 /** The one argument worth showing a reader, per tool. */
 function describe(name: string, args: Record<string, unknown>): string {
   if (name === 'search') {
-    const mode = args.mode && args.mode !== 'hybrid' ? ` (${String(args.mode)})` : ''
-    return `${String(args.query ?? '')}${mode}`
+    const mode = str(args.mode)
+    return `${str(args.query)}${mode && mode !== 'hybrid' ? ` (${mode})` : ''}`
   }
-  if (name === 'load_chunk') return `chunk ${String(args.chunk_id ?? '?')}`
+  if (name === 'load_chunk') return `chunk ${num(args.chunk_id, NaN) || '?'}`
   return Object.keys(args).length ? JSON.stringify(args) : ''
 }

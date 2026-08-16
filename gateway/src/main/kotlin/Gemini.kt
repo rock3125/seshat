@@ -10,8 +10,32 @@ import java.time.Duration
 /** One function call the model asked for. */
 data class ToolCall(val name: String, val args: JSONObject)
 
-/** What one streamed model turn produced. */
-data class Turn(val text: String, val calls: List<ToolCall>)
+/**
+ * What one streamed model turn produced.
+ *
+ * [finishReason] is Gemini's own last word on why the turn ended — "STOP" when
+ * it simply finished, and otherwise the thing that stopped it. It is carried
+ * out of here rather than acted on here, because whether a truncated answer is
+ * worth an error message is the agent loop's decision, not the transport's.
+ */
+data class Turn(val text: String, val calls: List<ToolCall>, val finishReason: String = "") {
+
+    /** A reason to tell the reader about, phrased for them, or null when the
+     *  turn ended normally. STOP and an absent reason are both normal; a turn
+     *  that stopped to call a tool reports nothing at all. */
+    fun trouble(): String? = when (finishReason.uppercase()) {
+        "", "STOP", "FINISH_REASON_UNSPECIFIED" -> null
+        "MAX_TOKENS" ->
+            "the answer hit the model's length limit and was cut off mid-thought"
+        "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII" ->
+            "the model stopped: its safety filters blocked the response ($finishReason)"
+        "RECITATION" ->
+            "the model stopped because the answer reproduced its training data too closely"
+        "MALFORMED_FUNCTION_CALL" ->
+            "the model produced a tool call this gateway could not parse"
+        else -> "the model stopped early ($finishReason)"
+    }
+}
 
 /**
  * Google Gemini over `streamGenerateContent?alt=sse`.
@@ -53,7 +77,9 @@ class Gemini(private val cfg: Config) {
 
         /** Stream one turn, emitting answer text through [onText] as it arrives. */
         fun stream(onText: (String) -> Unit): Turn {
-            val (text, parts) = send(onText)
+            val streamed = send(onText)
+            val text = streamed.text
+            val parts = streamed.calls
 
             // The model's turn goes into history as the model sent it: text
             // parts plus the untouched functionCall parts with their thought
@@ -63,11 +89,23 @@ class Gemini(private val cfg: Config) {
             for (p in parts) modelParts.put(p)
             if (modelParts.length() > 0) contents.put(content("model", modelParts))
 
-            return Turn(text, parts.map { part ->
-                val fc = part.getJSONObject("functionCall")
-                ToolCall(fc.optString("name"), fc.optJSONObject("args") ?: JSONObject())
-            })
+            return Turn(
+                text,
+                parts.map { part ->
+                    val fc = part.getJSONObject("functionCall")
+                    ToolCall(fc.optString("name"), fc.optJSONObject("args") ?: JSONObject())
+                },
+                streamed.finishReason,
+            )
         }
+
+        /** One turn off the wire: the text, the raw functionCall parts, and why
+         *  the model stopped. */
+        private inner class Streamed(
+            val text: String,
+            val calls: List<JSONObject>,
+            val finishReason: String,
+        )
 
         /** Append tool results — same order as the calls (see the class note). */
         fun addToolResults(calls: List<ToolCall>, results: List<String>) {
@@ -83,7 +121,7 @@ class Gemini(private val cfg: Config) {
         private fun content(role: String, parts: JSONArray) =
             JSONObject().put("role", role).put("parts", parts)
 
-        private fun send(onText: (String) -> Unit): Pair<String, List<JSONObject>> {
+        private fun send(onText: (String) -> Unit): Streamed {
             check(cfg.geminiApiKey.isNotBlank()) {
                 "GEMINI_API_KEY is not set on the gateway — chat is unavailable until it is"
             }
@@ -113,6 +151,8 @@ class Gemini(private val cfg: Config) {
 
             val text = StringBuilder()
             val calls = ArrayList<JSONObject>()
+            var finishReason = ""
+            var blockReason = ""
             res.body().forEach { raw ->
                 val line = raw.trim()
                 if (!line.startsWith("data:")) return@forEach
@@ -127,8 +167,20 @@ class Gemini(private val cfg: Config) {
                 chunk.optJSONObject("error")?.let {
                     throw IllegalStateException("Gemini error: ${it.optString("message")}")
                 }
-                val parts = chunk.optJSONArray("candidates")
-                    ?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                // A prompt refused outright never reaches `candidates` at all —
+                // the only thing on the wire is promptFeedback, which is why an
+                // answer to a blocked question used to arrive as silence.
+                chunk.optJSONObject("promptFeedback")?.optString("blockReason")
+                    ?.takeIf { it.isNotBlank() }?.let { blockReason = it }
+
+                val candidate = chunk.optJSONArray("candidates")?.optJSONObject(0)
+                    ?: return@forEach
+                // Last one wins: the reason arrives on the final chunk of the
+                // turn, and earlier chunks carry none.
+                candidate.optString("finishReason").takeIf { it.isNotBlank() }
+                    ?.let { finishReason = it }
+
+                val parts = candidate.optJSONObject("content")?.optJSONArray("parts")
                     ?: return@forEach
                 for (i in 0 until parts.length()) {
                     val part = parts.getJSONObject(i)
@@ -140,7 +192,18 @@ class Gemini(private val cfg: Config) {
                     }
                 }
             }
-            return text.toString() to calls
+            if (blockReason.isNotBlank()) {
+                throw IllegalStateException(
+                    "Gemini refused the prompt before answering (blockReason: $blockReason)")
+            }
+            // A turn that produced nothing whatever is not a valid answer, and
+            // returning it as one shows the reader an empty bubble and no
+            // reason for it.
+            if (text.isEmpty() && calls.isEmpty() && finishReason.isBlank()) {
+                throw IllegalStateException(
+                    "Gemini returned an empty response for model '${cfg.geminiModel}'")
+            }
+            return Streamed(text.toString(), calls, finishReason)
         }
     }
 

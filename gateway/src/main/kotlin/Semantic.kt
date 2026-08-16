@@ -199,8 +199,20 @@ class Chunking(private val cfg: Config, private val embeddings: Embeddings) {
         paragraphSignature
     }
 
+    /**
+     * CHUNK_MIN_CHARS governs BOTH chunkers.
+     *
+     * It used to reach only the semantic one: the fallback was called with the
+     * max alone and quietly used Chunker.MIN_CHARS instead, so the setting the
+     * brief names did nothing at all whenever semantic chunking was off or had
+     * fallen back to paragraphs. Since the number is stamped into the signature
+     * below, the two are now consistent in what they mean AND in what a change
+     * to the setting costs — a re-chunk on the next scan, either way.
+     */
+    private val paragraphMinChars: Int get() = cfg.chunkMinChars
+
     private val paragraphSignature: String
-        get() = "paragraph/v1 min=${Chunker.MIN_CHARS} max=${cfg.chunkMaxChars}"
+        get() = "paragraph/v2 min=$paragraphMinChars max=${cfg.chunkMaxChars}"
 
     fun split(body: String): Split {
         if (!cfg.semanticChunking) return paragraphs(body)
@@ -229,6 +241,8 @@ class Chunking(private val cfg: Config, private val embeddings: Embeddings) {
         )
     }
 
-    private fun paragraphs(body: String) =
-        Split(Chunker.split(body, maxChars = cfg.chunkMaxChars), paragraphSignature)
+    private fun paragraphs(body: String) = Split(
+        Chunker.split(body, minChars = paragraphMinChars, maxChars = cfg.chunkMaxChars),
+        paragraphSignature,
+    )
 }

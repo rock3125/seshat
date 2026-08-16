@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Composer from './components/Composer'
 import Rail from './components/Rail'
 import SourcesDrawer from './components/SourcesDrawer'
 import Transcript from './components/Transcript'
 import { AutoIcon, MoonIcon, RailIcon, SourcesIcon, SunIcon } from './components/icons'
 import { fetchConfig } from './api/gateway'
+import { NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { abortTurn, sendMessage } from './features/chat/sendMessage'
 import { store } from './store'
 import { useAppDispatch, useAppSelector } from './store/hooks'
@@ -23,14 +24,32 @@ export default function App() {
   const conversation = activeId ? byId[activeId] ?? null : null
   const busy = conversation?.messages.at(-1)?.streaming === true
 
-  // Every passage this thread retrieved, best first. Recomputed per render
-  // rather than stored: it is a fold over a list that is already in memory,
-  // and a second copy in the store is a second thing to keep correct.
-  const passages = [...new Map(
-    (conversation?.messages ?? [])
-      .flatMap((m) => m.passages ?? [])
-      .map((p) => [p.chunk_id, p]),
-  ).values()].sort((a, b) => b.score - a.score)
+  // Every passage this thread retrieved, best first. Folded rather than
+  // stored: it is a fold over a list that is already in memory, and a second
+  // copy in the store is a second thing to keep correct.
+  //
+  // Memoised rather than recomputed per render, because during a stream this
+  // component renders on every token and the fold builds a Map and a sorted
+  // array each time — none of which can change until retrieval returns
+  // something new.
+  //
+  // Keyed on the passages themselves, NOT on the messages array: appending a
+  // token replaces that array (Immer gives a new one whenever any message in
+  // it changes), so a dependency on it would be a dependency on every token.
+  const messages = conversation?.messages
+  const passageKey = (messages ?? [])
+    .flatMap((m) => m.passages?.map((p) => `${p.chunk_id}:${p.score}`) ?? [])
+    .join('|')
+  const passages = useMemo(
+    () => [...new Map(
+      (messages ?? []).flatMap((m) => m.passages ?? []).map((p) => [p.chunk_id, p]),
+    ).values()].sort((a, b) => b.score - a.score),
+    // `messages` is deliberately not a dependency: passageKey is the part of
+    // it this fold reads, and depending on the array itself would recompute on
+    // every streamed token — which is the whole thing being avoided here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [passageKey],
+  )
 
   const refreshConfig = useCallback(() => {
     fetchConfig()
@@ -51,10 +70,12 @@ export default function App() {
   }, [refreshConfig])
 
   function ask(prompt: string) {
-    void sendMessage(prompt, dispatch, store.getState)
+    // `store.getState` is passed as an arrow rather than as the bare method:
+    // detached from its object it would be called with the wrong `this`.
+    void sendMessage(prompt, dispatch, () => store.getState())
   }
 
-  const narrow = typeof window !== 'undefined' && window.innerWidth <= 960
+  const narrow = useMediaQuery(NARROW)
 
   return (
     <div

@@ -1,0 +1,81 @@
+# Both halves of the stack, on every push and pull request.
+#
+# Neither job needs a database, a vector store or an API key: the gateway's
+# tests are on pure functions (chunking, BM25, upload names, the request guards)
+# and the UI's are on the two parsers. That is deliberate — a suite that needs
+# `docker compose up` to say anything is a suite nobody runs before pushing.
+#
+# The gateway job builds the fat jar as well as running the tests, because the
+# jar has a failure mode the tests cannot see: the META-INF/services merge in
+# build.gradle.kts is what keeps gRPC's name resolvers and Tika's parsers
+# registered, and if it ever regresses the build still succeeds and the jar
+# fails at its first connection.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    name: gateway (Kotlin)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Matches the toolchain in build.gradle.kts and the Dockerfile.
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test
+        run: ./gradlew --no-daemon test
+
+      - name: Build the fat jar
+        run: ./gradlew --no-daemon fatJar
+
+      - name: Keep the test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-test-report
+          path: gateway/build/reports/tests/test
+
+  ui:
+    name: ui (React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # `tsc -b && vite build` — the type check is half of what this catches.
+      - name: Build
+        run: npm run build

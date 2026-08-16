@@ -110,7 +110,7 @@ export default function SourcesDrawer({
                 ) : state === 'error' ? (
                   <span className="more" style={{ color: 'var(--rubric)' }}>Could not load</span>
                 ) : !window ? (
-                  <button type="button" className="more" onClick={() => expand(p.chunk_id)}>
+                  <button type="button" className="more" onClick={() => void expand(p.chunk_id)}>
                     Read in context
                   </button>
                 ) : null}

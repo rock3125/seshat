@@ -145,6 +145,14 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
       EMBED_MODEL: ${EMBED_MODEL:-gemini-embedding-001}
       EMBED_DIMS: ${EMBED_DIMS:-768}
+      # Embedding batches in flight at once while indexing. The default suits a
+      # free-tier key, where more earns 429s that the retry backoff then has to
+      # wait out — which is slower than not having sent them.
+      EMBED_CONCURRENCY: ${EMBED_CONCURRENCY:-4}
+
+      # Empty: the browser reaches this service through nginx on the same
+      # origin, so no CORS headers are sent at all.
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
 
       # The ISSUER is what Keycloak stamps into a token — the browser-facing
       # URL. The JWKS URL is where THIS CONTAINER fetches the signing keys, and

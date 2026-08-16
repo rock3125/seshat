@@ -17,6 +17,7 @@
 // UPLOAD_ADMIN_ONLY. One decision, made once, in the place that enforces it.
 
 import Keycloak from 'keycloak-js'
+import { str } from '../json'
 
 export const keycloak = new Keycloak({
   url: import.meta.env.VITE_KEYCLOAK_URL ?? '/seshat/auth',
@@ -41,13 +42,13 @@ export function hasRole(role: 'use-ui' | 'admin'): boolean {
 }
 
 export function displayName(): string {
-  const t = keycloak.tokenParsed as Record<string, unknown> | undefined
-  return String(t?.name || t?.preferred_username || 'Signed in')
+  const t = keycloak.tokenParsed
+  return str(t?.name) || str(t?.preferred_username) || 'Signed in'
 }
 
 export function displayEmail(): string {
-  const t = keycloak.tokenParsed as Record<string, unknown> | undefined
-  return String(t?.email || t?.preferred_username || '')
+  const t = keycloak.tokenParsed
+  return str(t?.email) || str(t?.preferred_username)
 }
 
 export function signOut(): void {

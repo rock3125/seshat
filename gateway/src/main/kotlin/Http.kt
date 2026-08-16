@@ -65,6 +65,19 @@ class Http(
 
     @Volatile private var ready = false
 
+    /**
+     * How many uploads may be in Tika at once.
+     *
+     * An upload is held whole in memory — the request bytes, then the parser's
+     * state, then the extracted text — and the server hands out a virtual
+     * thread per request, so nothing else in the process bounds this. Four is
+     * chosen against the default 25MB cap and the container's heap, and the
+     * fifth caller waits rather than being refused: uploads arrive in a burst
+     * from one person dropping a folder on the window, and a queue is the right
+     * answer to a burst.
+     */
+    private val extracting = java.util.concurrent.Semaphore(4, true)
+
     fun start(): HttpServer {
         val server = HttpServer.create(InetSocketAddress(cfg.port), 0)
         server.createContext("/health") { it.handle(::health) }
@@ -131,7 +144,9 @@ class Http(
         val who = requireUser(ex) ?: return
 
         val body = try {
-            JSONObject(ex.requestBody.readBytes().toString(Charsets.UTF_8))
+            JSONObject(ex.readJsonBody())
+        } catch (e: BodyTooLarge) {
+            return ex.json(413, JSONObject().put("error", e.message))
         } catch (e: Exception) {
             return ex.json(400, JSONObject().put("error", "request body must be JSON"))
         }
@@ -148,7 +163,12 @@ class Http(
         // window it wants replayed. That keeps Postgres to the one job the
         // brief gives it — the chunks — and means no chat transcript is ever
         // written to disk server-side.
-        val history = body.optJSONArray("history")?.let { arr ->
+        //
+        // It also makes the size of a request someone else pays for a choice
+        // made by the caller, so the window is re-trimmed here. The UI already
+        // sends at most twenty messages; this is the bound for everything that
+        // is not the UI.
+        val sent = body.optJSONArray("history")?.let { arr ->
             (0 until arr.length()).mapNotNull { i ->
                 val m = arr.optJSONObject(i) ?: return@mapNotNull null
                 val role = m.optString("role")
@@ -156,6 +176,11 @@ class Http(
                 else Chat.Message(role, m.optString("content"))
             }
         } ?: emptyList()
+        val history = trimHistory(sent)
+        if (history.size < sent.size) {
+            log.info("history trimmed from {} to {} message(s) for {}",
+                sent.size, history.size, who.username)
+        }
 
         // Headers before the first token: once these are sent the status code
         // is fixed, so any failure after this point is an SSE `error` event
@@ -186,7 +211,9 @@ class Http(
     private fun mcpRoute(ex: HttpExchange) {
         if (ex.requestMethod != "POST") return ex.methodNotAllowed("POST")
         val msg = try {
-            JSONObject(ex.requestBody.readBytes().toString(Charsets.UTF_8))
+            JSONObject(ex.readJsonBody())
+        } catch (e: BodyTooLarge) {
+            return ex.json(413, Tools.error(null, -32600, e.message ?: "request too large"))
         } catch (e: Exception) {
             return ex.json(400, Tools.error(null, -32700, "parse error: ${e.message}"))
         }
@@ -250,6 +277,13 @@ class Http(
         val bytes = ex.requestBody.readNBytes((cfg.uploadMaxBytes + 1).toInt())
         if (bytes.size > cfg.uploadMaxBytes) return ex.tooLarge()
 
+        // Bounded here rather than inside Library: the wait is a property of
+        // this hop (a person watching a progress row), not of what indexing
+        // costs. Library's own lock still serialises the indexing half.
+        if (!extracting.tryAcquire(2, java.util.concurrent.TimeUnit.MINUTES)) {
+            return ex.json(503, JSONObject().put("error",
+                "the gateway is busy converting other uploads — try this file again shortly"))
+        }
         val upload = try {
             library.upload(name, bytes)
         } catch (e: Library.Rejected) {
@@ -265,6 +299,8 @@ class Http(
                     "docker-compose.yml (it must not be :ro) and its ownership"))
         } catch (e: IllegalStateException) {
             return ex.json(503, JSONObject().put("error", e.message))
+        } finally {
+            extracting.release()
         }
 
         val stats = db.stats()
@@ -314,9 +350,7 @@ class Http(
     private fun requireUser(ex: HttpExchange): Principal? {
         val auth = auth ?: return Principal("anonymous", "Anonymous", setOf("use-ui", "admin"))
 
-        val header = ex.requestHeaders.getFirst("Authorization")
-        val token = header?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
-            ?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()?.ifBlank { null }
+        val token = bearerToken(ex.requestHeaders.getFirst("Authorization"))
         if (token == null) {
             ex.responseHeaders.set("WWW-Authenticate", "Bearer realm=\"seshat\"")
             ex.json(401, JSONObject().put("error", "a Keycloak bearer token is required"))
@@ -346,16 +380,21 @@ class Http(
 
     /** CORS, error trapping and close, around every route.
      *
-     *  In compose the UI is same-origin (nginx serves it under the same host as
-     *  /seshat/api), so CORS is dead weight there. It is here for `npm run dev`
-     *  on :5173, which is cross-origin against this port. */
+     *  The UI is same-origin in both modes — nginx proxies /seshat/api in
+     *  production and the Vite dev server proxies the identical path — so no
+     *  browser here ever makes a cross-origin call and CORS_ORIGIN defaults to
+     *  blank, which sends no CORS headers at all. Set it to an origin only if
+     *  something genuinely cross-origin has to reach this port. */
     private fun HttpExchange.handle(route: (HttpExchange) -> Unit) {
         try {
-            responseHeaders.apply {
-                set("Access-Control-Allow-Origin", cfg.corsOrigin)
-                set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-                set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                set("Access-Control-Max-Age", "600")
+            if (cfg.corsOrigin.isNotBlank()) {
+                responseHeaders.apply {
+                    set("Access-Control-Allow-Origin", cfg.corsOrigin)
+                    set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                    set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                    set("Access-Control-Max-Age", "600")
+                    if (cfg.corsOrigin != "*") add("Vary", "Origin")
+                }
             }
             if (requestMethod == "OPTIONS") return empty(204)
             route(this)
@@ -368,6 +407,22 @@ class Http(
             close()
         }
     }
+
+    /** The request body as a JSON string, refusing anything implausible.
+     *
+     *  `/upload` streams its own bytes under its own cap; these two routes take
+     *  a JSON document, and `readBytes()` on an untrusted stream is an
+     *  allocation the caller chooses the size of. */
+    private fun HttpExchange.readJsonBody(): String {
+        val bytes = requestBody.readNBytes(MAX_JSON_BODY_BYTES + 1)
+        if (bytes.size > MAX_JSON_BODY_BYTES) {
+            throw BodyTooLarge("the request body is larger than the " +
+                "${MAX_JSON_BODY_BYTES / (1024 * 1024)}MB limit for this endpoint")
+        }
+        return bytes.toString(Charsets.UTF_8)
+    }
+
+    private class BodyTooLarge(message: String) : RuntimeException(message)
 
     private fun HttpExchange.json(status: Int, body: JSONObject) = send(status, body.toString())
     private fun HttpExchange.json(status: Int, body: JSONArray) = send(status, body.toString())
@@ -393,5 +448,59 @@ class Http(
     private fun HttpExchange.methodNotAllowed(allowed: String) {
         responseHeaders.set("Allow", allowed)
         json(405, JSONObject().put("error", "method not allowed"))
+    }
+
+    companion object {
+        /**
+         * The credentials out of an `Authorization` header, or null if it does
+         * not carry a bearer token.
+         *
+         * RFC 7235 makes the scheme case-INSENSITIVE, so the length of the
+         * scheme is what may be trusted, never its spelling: matching the
+         * prefix case-insensitively and then stripping the literal `"Bearer "`
+         * accepted `BEARER x` and handed the whole header on as if it were the
+         * token, which came back to the caller as "malformed token".
+         */
+        fun bearerToken(header: String?): String? {
+            val h = header?.trim() ?: return null
+            if (!h.startsWith(BEARER, ignoreCase = true)) return null
+            return h.substring(BEARER.length).trim().ifBlank { null }
+        }
+
+        private const val BEARER = "Bearer "
+
+        /**
+         * How much replayed conversation `/chat` will accept. The browser owns
+         * the history and sends the window it wants replayed (see [chatRoute]),
+         * which makes its size a caller's choice — and an unbounded one, until
+         * here. Both limits are on what is FORWARDED to the model, so the cost
+         * of a hostile or simply runaway client is bounded at this hop rather
+         * than on the Gemini bill.
+         */
+        const val MAX_HISTORY_MESSAGES = 40
+        const val MAX_HISTORY_CHARS = 200_000
+
+        /** The ceiling on a JSON request body (`/chat`, `/mcp`). Comfortably
+         *  above [MAX_HISTORY_CHARS] of UTF-8, and far below what an unbounded
+         *  `readBytes()` would let a caller allocate. */
+        const val MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
+
+        /**
+         * Keep the most recent messages that fit within both caps, oldest
+         * first. Trimming from the END backwards rather than the start is what
+         * keeps the turns nearest the question — the ones that carry the
+         * thread's actual context — when something has to go.
+         */
+        fun trimHistory(history: List<Chat.Message>): List<Chat.Message> {
+            val kept = ArrayDeque<Chat.Message>()
+            var chars = 0
+            for (m in history.asReversed()) {
+                if (kept.size >= MAX_HISTORY_MESSAGES) break
+                chars += m.content.length
+                if (chars > MAX_HISTORY_CHARS) break
+                kept.addFirst(m)
+            }
+            return kept.toList()
+        }
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 import Mark from './Mark'
 import type { Conversation, ServerConfig } from '../types'
@@ -28,6 +28,24 @@ export default function Transcript({
     if (!el) return
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
   }
+
+  // Which chunk ids this thread actually retrieved — a citation to anything
+  // else is rendered dead. Built across the whole conversation, not per
+  // message, because a follow-up routinely cites a source found two turns ago.
+  //
+  // The identity of this Set is what makes memo(MessageBubble) work. Rebuilt
+  // unconditionally, as it was, it is a new object on every render, every
+  // memoised bubble sees a changed prop, and a long thread re-renders in full
+  // on every streamed token — which is precisely what the memo was added to
+  // prevent. The key is cheap to recompute and only changes when retrieval
+  // actually returns something new.
+  const citationKey = (conversation?.messages ?? [])
+    .flatMap((m) => m.passages?.map((p) => p.chunk_id) ?? [])
+    .join(',')
+  const known = useMemo(
+    () => new Set(citationKey ? citationKey.split(',').map(Number) : []),
+    [citationKey],
+  )
 
   const last = conversation?.messages.at(-1)
   useLayoutEffect(() => {
@@ -64,14 +82,6 @@ export default function Transcript({
         </div>
       </div>
     )
-  }
-
-  // Which chunk ids this thread actually retrieved — a citation to anything
-  // else is rendered dead. Built across the whole conversation, not per
-  // message, because a follow-up routinely cites a source found two turns ago.
-  const known = new Set<number>()
-  for (const m of conversation.messages) {
-    for (const p of m.passages ?? []) known.add(p.chunk_id)
   }
 
   return (

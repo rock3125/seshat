@@ -51,7 +51,18 @@ class Chat(private val cfg: Config, private val gemini: Gemini, private val tool
                 sse.send("token", JSONObject().put("text", delta))
             }
 
-            if (turn.calls.isEmpty()) break          // a final answer
+            if (turn.calls.isEmpty()) {
+                // A final answer — or a turn that stopped for a reason the
+                // reader needs, which looks identical from here unless it is
+                // asked about. A safety block or a length cut-off otherwise
+                // arrives as a bubble that is empty or ends mid-sentence, with
+                // nothing to say why.
+                turn.trouble()?.let { why ->
+                    log.info("turn ended on {}: {}", turn.finishReason, why)
+                    sse.send("error", JSONObject().put("message", why))
+                }
+                break
+            }
 
             if (++round > cfg.maxToolRounds) {
                 sse.send("error", JSONObject().put("message",

@@ -3,6 +3,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppDispatch } from '../store/hooks'
 import { uiActions } from '../store/uiSlice'
+import { parseCitations } from '../features/chat/citations'
 import type { Message } from '../types'
 
 /**
@@ -91,63 +92,53 @@ function MessageBubble({ message, knownChunks }: { message: Message; knownChunks
   }
 }
 
-/** `[chunk:123]`, `[chunk:123, 456]` and bare `[123]` — the model is asked for
- *  the first form and reliably produces the other two as well.
- *
- *  The leading `\s*` is captured so it can be DROPPED: the model writes
- *  `...document" [chunk:4].` and a superscript marker floating a word-space
- *  away from the claim it supports reads as a stray number. Footnote markers
- *  sit tight against the text. */
-const CITATION = /\s*\[(?:chunk[:\s]*)?(\d+(?:\s*,\s*\d+)*)\]/g
-
 /** Rewrite citation markers inside a rendered node's children. Only string
  *  children are touched; anything already an element (a nested <code>, a link)
- *  passes through untouched, so a chunk id inside a code span stays literal. */
+ *  passes through untouched, so a chunk id inside a code span stays literal.
+ *
+ *  What counts as a marker lives in features/chat/citations.ts, where it can be
+ *  tested without rendering anything. */
 function cite(children: ReactNode, known: Set<number>, open: (id: number) => void): ReactNode {
   return mapText(children, (text, key) => {
-    const out: ReactNode[] = []
-    let last = 0
-    let m: RegExpExecArray | null
-    CITATION.lastIndex = 0
-    while ((m = CITATION.exec(text)) !== null) {
-      if (m.index > last) out.push(text.slice(last, m.index))
-      const ids = m[1].split(',').map((s) => Number(s.trim()))
-      for (const id of ids) {
-        const live = known.has(id)
-        out.push(
-          <button
-            key={`${key}-${m.index}-${id}`}
-            type="button"
-            className={`cite${live ? '' : ' dead'}`}
-            disabled={!live}
-            title={live ? `Open source ${id}` : `Source ${id} was not among this turn's results`}
-            onClick={live ? () => open(id) : undefined}
-          >
-            {id}
-          </button>,
-        )
-      }
-      last = m.index + m[0].length
-    }
-    if (last === 0) return text
-    if (last < text.length) out.push(text.slice(last))
-    return out
+    const pieces = parseCitations(text)
+    if (pieces.length === 1 && pieces[0].kind === 'text') return text
+
+    return pieces.map((piece, i) => {
+      if (piece.kind === 'text') return piece.text
+      const live = known.has(piece.id)
+      return (
+        <button
+          key={`${key}-${i}-${piece.id}`}
+          type="button"
+          className={`cite${live ? '' : ' dead'}`}
+          disabled={!live}
+          title={
+            live
+              ? `Open source ${piece.id}`
+              : `Source ${piece.id} was not among this turn's results`
+          }
+          onClick={live ? () => open(piece.id) : undefined}
+        >
+          {piece.id}
+        </button>
+      )
+    })
   })
 }
 
-/** Apply a transform to every string leaf of a React children tree. */
+/** Apply a transform to every string leaf of a React children tree.
+ *
+ *  `children` is typed as ReactNode, whose array form is ReactNode[] — the
+ *  explicit annotation on the map is what keeps that from widening to `any`
+ *  and quietly disabling type checking on everything it returns. */
 function mapText(
   children: ReactNode,
   transform: (text: string, key: string) => ReactNode,
 ): ReactNode {
   if (typeof children === 'string') return transform(children, '0')
   if (!Array.isArray(children)) return children
-  return children.map((child, i) =>
-    typeof child === 'string' ? (
-      <span key={i}>{transform(child, String(i))}</span>
-    ) : (
-      child
-    ),
+  return (children as ReactNode[]).map((child, i) =>
+    typeof child === 'string' ? <span key={i}>{transform(child, String(i))}</span> : child,
   )
 }
 

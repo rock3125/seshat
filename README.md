@@ -278,16 +278,33 @@ The model and the key are fixed there, as specified — there is no runtime
 provider switch and no per-request model override.
 
 `EMBED_DIMS` is index-breaking. Changing it means the stored vectors no longer
-match the query vectors, silently: delete the Qdrant volume and re-index.
+match the query vectors: the gateway checks the width of the collection it
+finds at boot and refuses to start against one that does not match, rather than
+accepting the setting and then failing on every upsert. Delete the Qdrant
+volume and re-index.
+
+`CHUNK_MIN_CHARS` governs both chunkers — the semantic one and the paragraph
+fallback — and is stamped into each document's chunker signature, so changing
+it re-chunks the corpus on the next scan rather than leaving it half one shape
+and half another.
 
 ## Development
 
 ```bash
-cd gateway && ./gradlew test          # chunking, semantic bunching, BM25, upload names
+cd gateway && ./gradlew test          # chunking, semantic bunching, BM25, upload
+                                      # names, request guards
 cd gateway && ./gradlew fatJar        # build/libs/gateway-all.jar
 
+cd ui && npm ci                       # first time
+cd ui && npm run lint                 # eslint, type-aware
+cd ui && npm test                     # citation parsing, SSE frames, and a
+                                      # regression test per UI defect fixed
 cd ui && npm run dev                  # :5173, proxying /seshat/api to :8090
 ```
+
+Both suites are pure — no database, no vector store, no API key — because a
+suite that needs `docker compose up` to say anything is a suite nobody runs
+before pushing. `.github/workflows/ci.yml` runs exactly the commands above.
 
 The Vite dev server proxies `/seshat/api` to `localhost:8090`, so the app is
 same-origin in development exactly as it is in production and no code path

@@ -62,29 +62,59 @@ function emptyUi(): UiState {
 // the system palette and then corrects itself.
 applyTheme(store.getState().ui.theme)
 
-// Persist on every change. The state is small (text, no attachments) and the
-// write is debounced by a frame, so this is cheaper than reasoning about which
-// actions are worth saving.
-let queued = false
+// Persist on every change, at most once every SAVE_MS.
+//
+// A frame used to be the interval, which meant serialising every thread in the
+// app up to sixty times a second for the whole length of an answer — and the
+// thing being serialised GROWS with each token, so the cost climbed as the
+// answer got longer. Nothing reads this file until the next page load, so the
+// only thing a shorter interval buys is a smaller loss if the tab dies mid
+// answer, and a quarter of a second of typing is not worth that price.
+//
+// The trailing write is the one that matters: whatever the interval, the last
+// state always reaches disk, so an answer that finishes is always saved whole.
+const SAVE_MS = 250
+let timer: number | null = null
+
+function persist(): void {
+  const { conversations, ui } = store.getState()
+  try {
+    localStorage.setItem(KEY, JSON.stringify({
+      conversations,
+      // Layout state is per-window, not per-user — only the theme is worth
+      // carrying across sessions.
+      ui: { theme: ui.theme },
+    }))
+  } catch {
+    // Quota exceeded on a very long history. Dropping the write keeps the
+    // app running; the in-memory state is unaffected.
+  }
+}
+
 store.subscribe(() => {
-  if (queued) return
-  queued = true
-  requestAnimationFrame(() => {
-    queued = false
-    const { conversations, ui } = store.getState()
-    try {
-      localStorage.setItem(KEY, JSON.stringify({
-        conversations,
-        // Layout state is per-window, not per-user — only the theme is worth
-        // carrying across sessions.
-        ui: { theme: ui.theme },
-      }))
-    } catch {
-      // Quota exceeded on a very long history. Dropping the write keeps the
-      // app running; the in-memory state is unaffected.
-    }
-  })
+  if (timer !== null) return
+  timer = window.setTimeout(() => {
+    timer = null
+    persist()
+  }, SAVE_MS)
 })
+
+// A tab closed or hidden mid-answer would otherwise lose up to SAVE_MS of it.
+// `pagehide` fires on close and on a bfcache navigation, where `unload` does
+// not; `visibilitychange` covers a phone being locked or the tab backgrounded.
+if (typeof window !== 'undefined') {
+  const flush = () => {
+    if (timer !== null) {
+      window.clearTimeout(timer)
+      timer = null
+    }
+    persist()
+  }
+  window.addEventListener('pagehide', flush)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush()
+  })
+}
 
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch

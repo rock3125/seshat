@@ -7,6 +7,7 @@
 
 import { API } from '../basePath'
 import { authHeaders } from '../auth/keycloak'
+import { str } from '../json'
 import type { Passage } from '../types'
 
 export interface StreamHandlers {
@@ -80,33 +81,50 @@ export async function streamChat(
   }
 }
 
-function dispatch(raw: string, handlers: StreamHandlers): void {
+/** One SSE frame — the text between two blank lines — as its event name and
+ *  decoded payload, or null if it carries no usable data.
+ *
+ *  Exported for its tests: this is the seam where a stream of bytes becomes
+ *  events the app acts on, and a frame parsed wrongly is an answer that arrives
+ *  garbled or not at all. */
+export function parseFrame(raw: string): { event: string; data: Record<string, unknown> } | null {
   let event = 'message'
   const dataLines: string[] = []
   for (const line of raw.split('\n')) {
     if (line.startsWith(':')) continue // comment / keep-alive
     if (line.startsWith('event:')) event = line.slice(6).trim()
+    // A `data:` line may legitimately be empty, and the field separator is
+    // one optional space — not "everything that looks like whitespace".
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
   }
-  if (dataLines.length === 0) return
+  if (dataLines.length === 0) return null
 
-  let data: Record<string, unknown> = {}
   try {
-    data = JSON.parse(dataLines.join('\n'))
+    const data = JSON.parse(dataLines.join('\n')) as unknown
+    // A JSON scalar is valid JSON and not an event payload; treating one as an
+    // object would hand `undefined` to every handler below.
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return null
+    return { event, data: data as Record<string, unknown> }
   } catch {
-    return
+    return null
   }
+}
+
+function dispatch(raw: string, handlers: StreamHandlers): void {
+  const frame = parseFrame(raw)
+  if (!frame) return
+  const { event, data } = frame
 
   switch (event) {
     case 'token':
-      handlers.onToken(String(data.text ?? ''))
+      handlers.onToken(str(data.text))
       break
     case 'tool_call':
-      handlers.onToolCall(String(data.name ?? ''), (data.args ?? {}) as Record<string, unknown>)
+      handlers.onToolCall(str(data.name), (data.args ?? {}) as Record<string, unknown>)
       break
     case 'tool_result':
       handlers.onToolResult(
-        String(data.name ?? ''),
+        str(data.name),
         Boolean(data.ok),
         Array.isArray(data.results) ? (data.results as Passage[]) : undefined,
       )
@@ -115,7 +133,7 @@ function dispatch(raw: string, handlers: StreamHandlers): void {
       handlers.onDone()
       break
     case 'error':
-      handlers.onError(String(data.message ?? 'stream error'))
+      handlers.onError(str(data.message, 'stream error'))
       break
   }
 }

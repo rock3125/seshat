@@ -30,6 +30,7 @@ data class Config(
     val geminiBaseUrl: String,
     val embedModel: String,
     val embedDims: Int,
+    val embedConcurrency: Int,
 
     val keycloakIssuer: String,
     val keycloakJwksUrl: String,
@@ -52,12 +53,31 @@ data class Config(
         private fun intEnv(name: String, default: Int) =
             System.getenv(name)?.trim()?.toIntOrNull() ?: default
 
-        private fun boolEnv(name: String, default: Boolean) =
-            when (System.getenv(name)?.trim()?.lowercase()) {
-                null, "" -> default
+        /**
+         * A flag, and a complaint about anything that is not one.
+         *
+         * The `else -> false` branch is the trap this exists to light up:
+         * LIBRARY_MIRROR=enabled, UPLOAD_ADMIN_ONLY=y, SEMANTIC_CHUNKING=True
+         * (before lowercasing) all read as OFF, silently, and the first sign is
+         * a feature that isn't running. Unrecognised values still resolve to
+         * false — changing that would be a behaviour change on a live
+         * deployment — but they no longer do it quietly.
+         */
+        private fun boolEnv(name: String, default: Boolean): Boolean {
+            val raw = System.getenv(name)?.trim() ?: return default
+            if (raw.isEmpty()) return default
+            return when (raw.lowercase()) {
                 "on", "true", "1", "yes" -> true
-                else -> false
+                "off", "false", "0", "no" -> false
+                else -> {
+                    System.err.println(
+                        "WARN  $name='$raw' is not a recognised flag value — reading it as OFF. " +
+                            "Use on/off, true/false, 1/0 or yes/no.",
+                    )
+                    false
+                }
             }
+        }
 
         const val DEFAULT_SYSTEM_PROMPT = """
 You are Seshat, an assistant that answers strictly from a private library of
@@ -127,6 +147,11 @@ Answering:
                     .trimEnd('/'),
                 embedModel = env("EMBED_MODEL", "gemini-embedding-001"),
                 embedDims = intEnv("EMBED_DIMS", 768),
+                // How many embedding batches are in flight at once while
+                // indexing. Four is chosen for a free-tier key, where more
+                // earns 429s and the retry backoff makes the whole thing
+                // slower; raise it on a paid key with room to move.
+                embedConcurrency = intEnv("EMBED_CONCURRENCY", 4).coerceIn(1, 32),
 
                 keycloakIssuer = issuer,
                 // Where THIS SERVICE fetches the realm keys. The issuer is the
@@ -140,7 +165,16 @@ Answering:
                 systemPrompt = env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT).trim(),
                 maxToolRounds = intEnv("MAX_TOOL_ROUNDS", 8),
                 searchCandidates = intEnv("SEARCH_CANDIDATES", 40),
-                corsOrigin = env("CORS_ORIGIN", "*"),
+                // Blank, and no CORS headers are sent at all.
+                //
+                // The app is same-origin in BOTH modes — nginx proxies
+                // /seshat/api to the gateway in production, and the Vite dev
+                // server proxies the identical path (vite.config.ts) — so the
+                // browser never makes a cross-origin request to this service
+                // and the `*` that used to be the default was permission
+                // nothing had asked for. Set it to a specific origin if you
+                // front the gateway some other way.
+                corsOrigin = env("CORS_ORIGIN"),
             )
         }
     }

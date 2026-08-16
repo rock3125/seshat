@@ -65,7 +65,8 @@ class Store(private val cfg: Config) : AutoCloseable {
         var attempt = 0
         while (true) {
             try {
-                if (client.collectionExistsAsync(cfg.collection).get()) {
+                if (client.collectionExistsAsync(cfg.collection).await()) {
+                    checkDimensions()
                     log.info("collection '{}' ready", cfg.collection)
                     return
                 }
@@ -94,10 +95,12 @@ class Store(private val cfg: Config) : AutoCloseable {
                             ),
                         )
                         .build(),
-                ).get()
+                ).await()
                 log.info("created collection '{}' (dense {}d cosine + bm25 sparse)",
                     cfg.collection, cfg.embedDims)
                 return
+            } catch (e: Dimensions) {
+                throw e          // a configuration error, not something to wait out
             } catch (e: Exception) {
                 attempt++
                 if (attempt % 6 == 1) log.warn("waiting for Qdrant: {}", e.message)
@@ -105,6 +108,32 @@ class Store(private val cfg: Config) : AutoCloseable {
                 Thread.sleep(2_000)
             }
         }
+    }
+
+    /** EMBED_DIMS no longer matching the collection that is actually there. */
+    class Dimensions(message: String) : RuntimeException(message)
+
+    /**
+     * The existing collection's dense width against the configured one.
+     *
+     * A collection is created once and then only ever opened, so changing
+     * EMBED_DIMS against an existing Qdrant volume used to be accepted in
+     * silence and then fail on every single upsert, for ever, with a gRPC
+     * dimension error a long way from its cause. The width is a property of the
+     * stored vectors and cannot be changed in place: the collection has to be
+     * dropped and the corpus re-embedded, so this says exactly that and stops.
+     */
+    private fun checkDimensions() {
+        val actual = client.getCollectionInfoAsync(cfg.collection).await()
+            .config.params.vectorsConfig.paramsMap.mapMap[DENSE]?.size?.toInt()
+            ?: return   // no named dense vector: an older or hand-made collection, leave it be
+        if (actual == cfg.embedDims) return
+        throw Dimensions(
+            "collection '${cfg.collection}' stores ${actual}d dense vectors but EMBED_DIMS is " +
+                "${cfg.embedDims}. A collection's width cannot be changed in place — either set " +
+                "EMBED_DIMS back to $actual, or delete the collection and re-index " +
+                "(docker compose down -v qdrant, then POST /reindex).",
+        )
     }
 
     data class Point(
@@ -140,7 +169,7 @@ class Store(private val cfg: Config) : AutoCloseable {
                         "title" to value(p.title),
                     ))
                     .build()
-            }).get()
+            }).await(WRITE_TIMEOUT_SECONDS)
         }
     }
 
@@ -150,7 +179,7 @@ class Store(private val cfg: Config) : AutoCloseable {
         client.deleteAsync(
             cfg.collection,
             Filter.newBuilder().addMust(match("document_id", documentId)).build(),
-        ).get()
+        ).await(WRITE_TIMEOUT_SECONDS)
     }
 
     data class Hit(val chunkId: Long, val score: Float)
@@ -198,12 +227,12 @@ class Store(private val cfg: Config) : AutoCloseable {
             }
         }
 
-        return client.queryAsync(q.build()).get().map { Hit(it.id.num, it.score) }
+        return client.queryAsync(q.build()).await().map { Hit(it.id.num, it.score) }
     }
 
     /** A real round trip, for the readiness probe. */
     fun ping() {
-        client.collectionExistsAsync(cfg.collection).get()
+        client.collectionExistsAsync(cfg.collection).await()
     }
 
     override fun close() {
@@ -213,5 +242,31 @@ class Store(private val cfg: Config) : AutoCloseable {
     companion object {
         const val DENSE = "dense"
         const val SPARSE = "bm25"
+
+        /** A search happens with someone waiting on it; a batch upsert of 256
+         *  points does not. Both are bounded, because the alternative to a
+         *  bounded wait is a request thread parked for ever on a Qdrant that
+         *  stopped answering without closing the connection. */
+        private const val READ_TIMEOUT_SECONDS = 30L
+        private const val WRITE_TIMEOUT_SECONDS = 120L
+
+        /**
+         * `get()` with a deadline, and without the wrapper.
+         *
+         * A future that fails reports an ExecutionException whose message is
+         * the class name of the real cause, which is what turned a Qdrant error
+         * into "java.util.concurrent.ExecutionException" in the logs. Unwrapping
+         * here means every caller's error message is Qdrant's own.
+         */
+        private fun <T> java.util.concurrent.Future<T>.await(
+            seconds: Long = READ_TIMEOUT_SECONDS,
+        ): T = try {
+            get(seconds, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.ExecutionException) {
+            throw e.cause ?: e
+        } catch (e: java.util.concurrent.TimeoutException) {
+            cancel(true)
+            throw java.util.concurrent.TimeoutException("Qdrant did not answer within ${seconds}s")
+        }
     }
 }

@@ -9,6 +9,15 @@ export default defineConfig(({ mode }) => {
   return {
     base: env.VITE_BASE || '/',
     plugins: [react()],
+    test: {
+      // jsdom, not node: the three things most worth pinning here — the media
+      // query the layout switches on, the localStorage the threads live in,
+      // and the render behaviour of the transcript — are all browser APIs, and
+      // under the default `node` environment none of them exists to test.
+      environment: 'jsdom',
+      setupFiles: ['./src/test/setup.ts'],
+      restoreMocks: true,
+    },
     server: {
       port: 5173,
       // Dev only: the gateway is on its own port here, not behind the nginx

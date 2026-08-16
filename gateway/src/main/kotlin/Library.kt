@@ -101,7 +101,11 @@ class Library(
      * [reindex] can run a folder pass inside its own guard rather than dropping
      * the lock between the two halves of a repair.
      */
-    private fun scanLocked(label: String = "library scan", always: Boolean = false): Result {
+    private fun scanLocked(
+        label: String = "library scan",
+        always: Boolean = false,
+        trustStat: Boolean = true,
+    ): Result {
         val startedAt = System.nanoTime()
         val root = Path.of(cfg.libraryDir)
         if (!Files.isDirectory(root)) {
@@ -133,7 +137,7 @@ class Library(
             }
             seen.add(relative)
             try {
-                when (indexOne(file, relative, known[relative], avgdl).outcome) {
+                when (indexOne(file, relative, known[relative], avgdl, trustStat).outcome) {
                     Outcome.INDEXED -> indexed++
                     Outcome.UNCHANGED -> unchanged++
                     Outcome.SKIPPED -> { skipped++; seen.remove(relative) }
@@ -189,13 +193,45 @@ class Library(
      *  it was actually re-chunked). */
     private data class Indexed(val outcome: Outcome, val chunks: Int)
 
-    private fun indexOne(file: Path, relative: String, known: Db.DocRow?, avgdl: Double): Indexed {
+    private fun indexOne(
+        file: Path,
+        relative: String,
+        known: Db.DocRow?,
+        avgdl: Double,
+        trustStat: Boolean = true,
+    ): Indexed {
+        val attributes = Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes::class.java)
+        val size = attributes.size()
+        val mtime = attributes.lastModifiedTime().toMillis()
+
+        // The fast path: size, mtime and chunker all matching what was indexed
+        // means the file is not opened at all.
+        //
+        // This poll runs every minute, and reading and hashing the entire
+        // corpus to discover that nothing changed is most of what it used to
+        // cost. The trade is the one `make` and `rsync` make: a file edited so
+        // that its size AND its mtime are both unchanged is missed. That takes
+        // deliberate effort to arrange, the sha-256 below still governs
+        // everything that does get read, and `POST /reindex` passes
+        // trustStat=false to re-hash the corpus regardless — so the repair path
+        // is never the thing that is guessing.
+        if (trustStat && known != null && known.chunker == chunking.signature &&
+            known.bytes == size && known.mtime == mtime && known.mtime != 0L
+        ) {
+            return Indexed(Outcome.UNCHANGED, known.chunkCount)
+        }
+
         val bytes = Files.readAllBytes(file)
         val sha = sha256(bytes)
         // Unchanged means BOTH the bytes and the chunker: editing
         // CHUNK_MIN_CHARS in .env has to re-chunk a corpus whose files nobody
         // touched, or the corpus quietly becomes a mixture of two chunkings.
         if (known != null && known.sha256 == sha && known.chunker == chunking.signature) {
+            // The content is what it was, but the stat gate above did not fire —
+            // a touched file, or a row written before mtime was recorded. Write
+            // the current stat back so the next tick takes the fast path, and
+            // do not re-embed a thing.
+            if (known.bytes != size || known.mtime != mtime) db.touchDocument(known.id, size, mtime)
             return Indexed(Outcome.UNCHANGED, known.chunkCount)
         }
 
@@ -219,7 +255,7 @@ class Library(
         // /reindex`, and the sha-256 is already committed so the next scan
         // won't loop on the same file forever.
         val (documentId, chunkIds) = db.replaceDocument(
-            relative, title, sha, bytes.size.toLong(), chunks, split.signature)
+            relative, title, sha, size, mtime, chunks, split.signature)
 
         store.deleteDocument(documentId)   // stale points from the previous version
         val dense = embeddings.documents(chunks.map { it.text })
@@ -388,7 +424,12 @@ class Library(
         try {
             val file = Path.of(cfg.libraryDir).resolve(relative)
             if (!file.isRegularFile()) return Ingested(Ingest.BUSY, 0)
-            val result = indexOne(file, relative, db.documents()[relative], db.averageChunkTokens())
+            // The one row this needs, not the whole registry — and trustStat is
+            // off because the file was just written by [upload]: its mtime is
+            // current by definition, so the fast path could only ever agree
+            // with a hash that has to be computed anyway to store it.
+            val result = indexOne(
+                file, relative, db.document(relative), db.averageChunkTokens(), trustStat = false)
             return when (result.outcome) {
                 Outcome.INDEXED -> Ingested(Ingest.INDEXED, result.chunks)
                 Outcome.UNCHANGED -> Ingested(Ingest.UNCHANGED, result.chunks)
@@ -430,7 +471,10 @@ class Library(
         }
         val startedAt = System.nanoTime()
         try {
-            val scan = scanLocked(label = "reindex scan", always = true)
+            // trustStat=false: a reindex is the repair path, and the one thing
+            // it must not do is trust the same fast path a routine tick does.
+            // Every file is opened and hashed.
+            val scan = scanLocked(label = "reindex scan", always = true, trustStat = false)
 
             val avgdl = db.averageChunkTokens()
             var count = 0
