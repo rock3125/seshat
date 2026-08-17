@@ -765,14 +765,24 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   letter-spacing: 0.06em;
   color: var(--ink-3);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 1.5rem;
+  /* Row gap first: it only applies once the halves have wrapped onto separate
+     lines, where 1.5rem would read as two unrelated notes. */
+  gap: 0.25rem 1.5rem;
 }
 
-/* Each half stays on one line or leaves — a hint that wraps mid-phrase
-   ("Shift+Enter for a new" / "line") is worse than no hint. */
+/* Each half stays on one line, and when both cannot sit side by side the second
+   takes a line of its own.
+   Two things are being avoided. A hint that wraps mid-phrase ("Shift+Enter for
+   a new" / "line") is worse than no hint — hence nowrap on each span. And half
+   a sentence is worse than either: this box is `--measure` wide, which is 68ch
+   resolved in ITS OWN font (mono, --t-micro) and so ~450px, while the two
+   phrases are 94 characters plus the gap between them. They never fitted side
+   by side at any window width, and the ellipsis that used to be here simply cut
+   the second one off — "Answers are draw…" — which is exactly the half of the
+   interface's claim that needed saying. */
 .composer-note span { white-space: nowrap; }
-.composer-note span:last-child { overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 40rem) {
   .composer-note span:last-child { display: none; }
