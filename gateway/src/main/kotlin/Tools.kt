@@ -14,12 +14,20 @@ import org.slf4j.LoggerFactory
  * UI and the model in someone's editor see exactly the same tool descriptions
  * and get exactly the same results, because there is no second implementation
  * to drift.
+ *
+ * Because there is one implementation, there is one place to audit. [call]
+ * takes the caller, and every retrieval against the shared corpus is recorded
+ * there — whether it arrived through a chat turn or from an editor over MCP.
+ * Auditing at either call site instead would have meant auditing at both, and
+ * then discovering months later that one of them had stopped.
  */
 class Tools(
     private val cfg: Config,
     private val db: Db,
     private val store: Store,
     private val embeddings: Embeddings,
+    private val audit: Audit? = null,
+    private val metrics: Metrics? = null,
 ) {
     private val log = LoggerFactory.getLogger("Tools")
 
@@ -96,17 +104,87 @@ class Tools(
      * missing chunk all come back as a tool error the model can read and act
      * on, because an exception here would kill a chat turn that was otherwise
      * one retry away from succeeding.
+     *
+     * [who] and [requestId] are for the audit trail and may be absent — a tool
+     * called with no principal is recorded as such rather than refused, because
+     * refusing here would mean the auth decision was being made in two places.
+     * It is made in [Http].
      */
-    fun call(name: String, args: JSONObject): JSONObject = try {
-        when (name) {
-            "search" -> search(args)
-            "load_chunk" -> loadChunk(args)
-            else -> failure("unknown tool '$name' — this server offers search and load_chunk")
+    fun call(
+        name: String,
+        args: JSONObject,
+        who: Principal? = null,
+        requestId: String = "",
+    ): JSONObject {
+        val started = System.nanoTime()
+        val outcome = try {
+            when (name) {
+                "search" -> search(args)
+                "load_chunk" -> loadChunk(args)
+                else -> failure("unknown tool '$name' — this server offers search and load_chunk")
+            }
+        } catch (e: Exception) {
+            log.warn("tool '{}' failed: {}", name, e.toString())
+            failure("tool '$name' failed — ${e.javaClass.simpleName}: ${e.message ?: "no detail"}")
         }
-    } catch (e: Exception) {
-        log.warn("tool '{}' failed: {}", name, e.toString())
-        failure("tool '$name' failed — ${e.javaClass.simpleName}: ${e.message ?: "no detail"}")
+
+        val millis = ((System.nanoTime() - started) / 1_000_000).toInt()
+        val ok = !outcome.optBoolean("isError", false)
+        metrics?.toolCall(name, ok, millis / 1000.0)
+        recordCall(name, args, outcome, ok, who, requestId, millis)
+        return outcome
     }
+
+    /**
+     * The audit record for one tool call.
+     *
+     * The QUERY is recorded in full, and that is the deliberate part. A search
+     * runs against one shared corpus that everyone signed in can read, so what
+     * was searched for is the thing an administrator actually needs to be able
+     * to see — unlike the chat prompt, which is the user's own words and is
+     * hashed by default (AUDIT_CHAT_PROMPTS). The distinction is between what
+     * someone asked and what the system was made to do with the library.
+     */
+    private fun recordCall(
+        name: String, args: JSONObject, outcome: JSONObject, ok: Boolean,
+        who: Principal?, requestId: String, millis: Int,
+    ) {
+        val audit = audit ?: return
+        val action = when (name) {
+            "search" -> Audit.TOOL_SEARCH
+            "load_chunk" -> Audit.TOOL_LOAD_CHUNK
+            else -> return
+        }
+        val detail = JSONObject()
+        val target: String
+        if (name == "search") {
+            target = args.optString("query")
+            detail.put("mode", args.optString("mode", "hybrid"))
+            detail.put("top_k", args.optInt("top_k", 6))
+            detail.put("hits", hitCount(outcome))
+        } else {
+            target = args.optLong("chunk_id").toString()
+            detail.put("before", args.optInt("before", 0))
+            detail.put("after", args.optInt("after", 0))
+        }
+        audit.record(
+            who = who,
+            action = action,
+            outcome = if (ok) Audit.Outcome.OK else Audit.Outcome.ERROR,
+            target = target,
+            requestId = requestId,
+            durationMs = millis,
+            detail = detail,
+        )
+    }
+
+    /** How many results a successful tool result carried, for the audit row.
+     *  Best-effort: a result that will not parse costs the record a number, not
+     *  the record. */
+    private fun hitCount(outcome: JSONObject): Int = runCatching {
+        val text = outcome.optJSONArray("content")?.optJSONObject(0)?.optString("text") ?: return 0
+        JSONObject(text).optInt("count", 0)
+    }.getOrDefault(0)
 
     private fun search(args: JSONObject): JSONObject {
         val query = args.optString("query").trim()
@@ -192,12 +270,16 @@ class Tools(
 
     /**
      * Handle one JSON-RPC message, or return null when none is due
-     * (notifications). [authorised] is false when the caller presented no valid
-     * token: the handshake still answers, so a client can connect and discover
-     * the catalogue, but `tools/call` is refused — the transport has already
-     * sent a 401 in that case (see Http).
+     * (notifications).
+     *
+     * The handshake answers unauthenticated, so a client can connect and
+     * discover the catalogue before any user is involved; `tools/call` does not
+     * reach here at all without a verified principal, because the transport
+     * has already sent a 401 (see Http). [who] is therefore non-null for every
+     * call that touches the corpus, and is carried through purely so the audit
+     * row says who.
      */
-    fun rpc(msg: JSONObject): JSONObject? {
+    fun rpc(msg: JSONObject, who: Principal? = null, requestId: String = ""): JSONObject? {
         val method = msg.optString("method", null) ?: return null
         val hasId = msg.has("id") && !msg.isNull("id")
         val id: Any? = if (hasId) msg.get("id") else null
@@ -223,7 +305,11 @@ class Tools(
                 "ping" -> ok(JSONObject())
                 "tools/list" -> ok(JSONObject().put("tools", list()))
                 "tools/call" -> ok(
-                    call(params.optString("name"), params.optJSONObject("arguments") ?: JSONObject()),
+                    call(
+                        params.optString("name"),
+                        params.optJSONObject("arguments") ?: JSONObject(),
+                        who, requestId,
+                    ),
                 )
                 "notifications/initialized", "notifications/cancelled" -> null
                 else -> if (hasId) error(id, -32601, "method not found: $method") else null

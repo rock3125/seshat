@@ -36,6 +36,16 @@ data class Config(
     val keycloakJwksUrl: String,
     val keycloakAudience: String,
 
+    val auditEnabled: Boolean,
+    val auditChatPrompts: Boolean,
+    val auditReads: Boolean,
+    val auditBlocking: Boolean,
+    val auditRetentionDays: Int,
+
+    val metricsEnabled: Boolean,
+    val lokiUrl: String,
+    val prometheusUrl: String,
+
     val systemPrompt: String,
     val maxToolRounds: Int,
     val searchCandidates: Int,
@@ -45,6 +55,15 @@ data class Config(
      *  of the service uses, so `/chat` and `/mcp` can never disagree about
      *  whether a caller had to sign in. */
     val authEnabled: Boolean get() = keycloakIssuer.isNotBlank()
+
+    /** Whether the Admin tab's log view has anything behind it. Reported in
+     *  `/config` so the UI never renders a panel that would only 503. */
+    val logsEnabled: Boolean get() = lokiUrl.isNotBlank()
+
+    /** Likewise for the metrics panels. Note that this is about *querying*
+     *  Prometheus; [metricsEnabled] is about this process *exposing* /metrics,
+     *  and one is useful without the other. */
+    val metricsQueryEnabled: Boolean get() = prometheusUrl.isNotBlank()
 
     companion object {
         private fun env(name: String, default: String = "") =
@@ -161,6 +180,37 @@ Answering:
                 keycloakJwksUrl = env("KEYCLOAK_JWKS_URL")
                     .ifBlank { if (issuer.isBlank()) "" else "$issuer/protocol/openid-connect/certs" },
                 keycloakAudience = env("KEYCLOAK_AUDIENCE"),
+
+                auditEnabled = boolEnv("AUDIT_ENABLED", true),
+                // OFF, and this default is a decision rather than a shrug.
+                //
+                // /chat states plainly that no chat transcript is ever written
+                // to disk server-side: the browser owns the history. Auditing
+                // the TURN does not change that — who asked, when, how long it
+                // took, and which searches it ran are all recorded either way.
+                // Auditing the PROMPT does, so it is opt-in, and what is kept
+                // by default is a sha-256 prefix and a length: enough to prove a
+                // turn happened and to spot the same question twice, and not
+                // enough to read anyone's questions out of the table.
+                auditChatPrompts = boolEnv("AUDIT_CHAT_PROMPTS", false),
+                // GET /config is polled once a minute per open tab. Auditing it
+                // is a row per user per minute for ever, which buries every row
+                // that means something — so reads are off unless a deployment
+                // genuinely has to have them.
+                auditReads = boolEnv("AUDIT_READS", false),
+                // Off: a full audit queue drops rows and says so, rather than
+                // making every chat turn wait on Postgres. On: the queue applies
+                // back-pressure instead, which is slower under load and leaves
+                // no gaps — the right choice where the trail has to be complete.
+                auditBlocking = boolEnv("AUDIT_BLOCKING", false),
+                auditRetentionDays = intEnv("AUDIT_RETENTION_DAYS", 90).coerceIn(1, 3650),
+
+                metricsEnabled = boolEnv("METRICS_ENABLED", true),
+                // Blank in both cases means "that half of the Admin tab is not
+                // deployed", which is exactly what `docker compose up` without
+                // the `observe` profile produces. The UI is told, and hides it.
+                lokiUrl = env("LOKI_URL").trimEnd('/'),
+                prometheusUrl = env("PROMETHEUS_URL").trimEnd('/'),
 
                 systemPrompt = env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT).trim(),
                 maxToolRounds = intEnv("MAX_TOOL_ROUNDS", 8),

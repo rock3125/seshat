@@ -5,10 +5,10 @@ import java.sql.Connection
 import java.sql.ResultSet
 
 /**
- * Postgres: the chunk store, and the document registry the library scanner
- * diffs a folder against.
+ * Postgres: the chunk store, the document registry the library scanner diffs a
+ * folder against, and the audit trail.
  *
- * Two tables and nothing else. `document` is one row per file in the library
+ * `document` is one row per file in the library
  * (its sha-256 is what makes a rescan a no-op for unchanged files); `chunk` is
  * one row per paragraph, and is the authoritative text — Qdrant holds only
  * vectors and the ids needed to get back here, so the corpus can be re-indexed
@@ -17,6 +17,10 @@ import java.sql.ResultSet
  * `chunk.id` is also the Qdrant point id. One integer identifies a paragraph in
  * both stores, which is why a search hit can be turned back into text with a
  * single primary-key lookup.
+ *
+ * `audit` is the third table and belongs to a different job entirely — it is
+ * written by [Audit], read by the admin API, and touched by nothing that serves
+ * a chat turn. It lives here only because the schema is created in one place.
  */
 class Db(cfg: Config) : AutoCloseable {
     private val log = LoggerFactory.getLogger("Db")
@@ -376,6 +380,42 @@ class Db(cfg: Config) : AutoCloseable {
             -- pre-existing row misses that test once and is hashed exactly one
             -- more time, which is the safe direction to be wrong in.
             alter table document add column if not exists mtime bigint not null default 0;
+
+            -- The audit trail: one row per user action, written by Audit.
+            --
+            -- `detail` is jsonb rather than twenty more columns because the
+            -- interesting field differs per action — a chunk id, a file size, a
+            -- rejection reason, a log query — and a table that is mostly nulls
+            -- is worse than one document per row.
+            --
+            -- `request_id` is the same value that goes into the MDC as `req`,
+            -- and therefore onto every log line the request produced. One id is
+            -- what lets the Admin tab put an audit row and its log lines side by
+            -- side; it costs a UUID and a column.
+            create table if not exists audit (
+                id          bigserial   primary key,
+                at          timestamptz not null default now(),
+                username    text        not null,
+                subject     text        not null default '',
+                session     text        not null default '',
+                request_id  text        not null default '',
+                action      text        not null,
+                target      text        not null default '',
+                outcome     text        not null,
+                status      int         not null default 0,
+                ip          text        not null default '',
+                duration_ms int         not null default 0,
+                detail      jsonb       not null default '{}'
+            );
+
+            -- Every filter the admin API offers, in index form. `(at desc, id
+            -- desc)` rather than `(at desc)` alone because the cursor pages on
+            -- both — two rows written in the same millisecond are common, and
+            -- paging on the timestamp alone either repeats one or skips one.
+            create index if not exists audit_at_idx        on audit (at desc, id desc);
+            create index if not exists audit_user_at_idx   on audit (username, at desc, id desc);
+            create index if not exists audit_action_at_idx on audit (action, at desc, id desc);
+            create index if not exists audit_req_idx       on audit (request_id);
         """.trimIndent()
     }
 }

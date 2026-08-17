@@ -1,0 +1,81 @@
+# What Prometheus scrapes, and how cAdvisor's labels are made to match
+# everything else's.
+#
+# Nothing here is published. Every target is a compose service name on the
+# internal network, and the only thing that reads the result is the gateway,
+# which offers a fixed vocabulary of named panels over it (see Panels.kt).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: seshat
+
+scrape_configs:
+  # The application's own metrics: requests, chat turns, tool calls, embedding
+  # traffic, the audit queue. Unauthenticated on purpose — Prometheus holds no
+  # token, the gateway's port is not published, and ui/nginx.conf returns 404
+  # for the one path that would expose it through the proxy that IS published.
+  - job_name: gateway
+    static_configs:
+      - targets: ['gateway:8090']
+
+  # Qdrant exposes Prometheus metrics on its REST port with no configuration.
+  - job_name: qdrant
+    static_configs:
+      - targets: ['qdrant:6333']
+
+  # Keycloak serves metrics on the MANAGEMENT port (9000), and — the part that
+  # costs an hour if guessed — the management interface inherits
+  # KC_HTTP_RELATIVE_PATH, so the path carries the /seshat/auth prefix. Plain
+  # :9000/metrics returns 404 and looks exactly like KC_METRICS_ENABLED being
+  # off. The health check in docker-compose.yml learnt the same lesson.
+  - job_name: keycloak
+    metrics_path: /seshat/auth/metrics
+    static_configs:
+      - targets: ['keycloak:9000']
+
+  - job_name: loki
+    static_configs:
+      - targets: ['loki:3100']
+
+  - job_name: alloy
+    static_configs:
+      - targets: ['alloy:12345']
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Per-container CPU, memory, network and disk for every service in the stack
+  # — which is why neither Postgres nor nginx needs an exporter of its own.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metric_relabel_configs:
+      # cAdvisor labels a container by its compose service, under a long name.
+      # Copying it to `service` is what lets one PromQL query say
+      # `sum by (service)` across cAdvisor and the gateway alike, instead of
+      # every panel knowing which exporter it came from.
+      - source_labels: [container_label_com_docker_compose_service]
+        target_label: service
+
+      # Host-level and pause cgroups have no compose service and are not what
+      # this stack is being asked about. Dropped at ingest rather than filtered
+      # in every query.
+      - source_labels: [service]
+        regex: '^$'
+        action: drop
+
+      # Everything else this stack is not part of, for the same reason.
+      - source_labels: [container_label_com_docker_compose_project]
+        regex: 'seshat'
+        action: keep
+
+      # The compose labels have done their job. `id` is the cgroup path and is
+      # unique per container already covered by `name`, so it is pure
+      # cardinality. `name` is deliberately KEPT — dropping both would collapse
+      # two containers of one service into duplicate samples at the same
+      # timestamp, which Prometheus rejects rather than merges.
+      - regex: 'container_label_com_docker_compose_.*|id'
+        action: labeldrop

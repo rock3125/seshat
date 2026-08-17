@@ -1,5 +1,6 @@
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -41,6 +42,42 @@ class GatewayGuardsTest {
         assertNull(Http.bearerToken("Bearer    "))      // scheme with nothing after it
         assertNull(Http.bearerToken("Basic dXNlcjpwdw=="))
         assertNull(Http.bearerToken("Bearerabc"))       // not the scheme, just a prefix
+    }
+
+    // --- what a role lets you do -----------------------------------------------
+
+    private fun principal(vararg roles: String) =
+        Principal("someone", "Someone", roles.toSet(), subject = "sub-1", sessionId = "sid-1")
+
+    @Test
+    fun `a plain user may use the app and nothing else`() {
+        val who = principal(Principal.USE_UI)
+        assertTrue(Principal.USE_UI in who.roles)
+        assertFalse(who.isAdmin)
+        assertFalse(who.mayAudit)
+    }
+
+    @Test
+    fun `an admin may both change the corpus and read the trail`() {
+        val who = principal(Principal.USE_UI, Principal.ADMIN)
+        assertTrue(who.isAdmin)
+        assertTrue(who.mayAudit)
+    }
+
+    @Test
+    fun `an auditor may read the trail without being able to reindex`() {
+        // The whole reason the two capabilities are separate: this account is a
+        // role assignment in Keycloak, not a change here.
+        val who = principal(Principal.USE_UI, Principal.OBSERVABILITY)
+        assertFalse(who.isAdmin)
+        assertTrue(who.mayAudit)
+    }
+
+    @Test
+    fun `a role that merely looks like admin grants nothing`() {
+        val who = principal(Principal.USE_UI, "administrator", "admin-ui", "ADMIN")
+        assertFalse(who.isAdmin)
+        assertFalse(who.mayAudit)
     }
 
     // --- replayed history ------------------------------------------------------

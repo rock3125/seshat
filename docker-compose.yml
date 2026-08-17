@@ -4,31 +4,86 @@
 #   docker compose up -d --build
 #   open http://localhost:8800/seshat/
 #
-# Five services, and the shape is the point:
+# Nine services, and the shape is the point:
 #
 #   ui        nginx. The ONLY published port. Serves the SPA and reverse-proxies
 #             the gateway and Keycloak, so the browser sees one origin and an
 #             outer proxy forwards exactly one path (/seshat).
 #   gateway   one Kotlin jar that is both the MCP server and the chat gateway.
 #             Reads the library folder, chunks it, indexes it, searches it, and
-#             streams Gemini's answers over those same tools.
-#   postgres  the chunks, and the document registry the scanner diffs against.
+#             streams Gemini's answers over those same tools. Also keeps the
+#             audit trail and serves the admin API behind it.
+#   postgres  the chunks, the document registry the scanner diffs against, and
+#             the audit trail.
 #   qdrant    the vectors: dense (Gemini embeddings) + sparse (BM25).
 #   keycloak  identity. The gateway verifies its tokens; the UI redirects to it.
 #
-# Postgres and Qdrant publish nothing by default — they are reachable on the
-# compose network and nowhere else. Uncomment their ports for psql or the
-# Qdrant dashboard while developing.
+#   loki      the log store.
+#   alloy     tails every container above and ships it to Loki.
+#   prometheus  scrapes the metrics of everything that exposes any.
+#   cadvisor  per-container CPU, memory, network and disk, for Prometheus.
+#
+# Only `ui` publishes a port. Everything else — including the whole
+# observability half — is reachable on the compose network and nowhere else,
+# and the browser reaches the logs and metrics through the gateway's admin API,
+# which checks a Keycloak role first.
+#
+# EVERY SERVICE LOGS JSON on stdout. That is what lets Alloy ship fields rather
+# than a regex's guess at them, and it is why `docker compose logs gateway` is
+# now best read through jq:
+#
+#   docker compose logs gateway | jq -r '"\(.ts) \(.level) \(.logger) \(.msg)"'
+#
+# Uncomment the port lines below for psql, the Qdrant dashboard, or Prometheus'
+# own expression browser while developing.
 
 name: seshat
+
+# Log rotation, applied to every service.
+#
+# Alloy tails the json-file logs Docker writes, and without a cap those files
+# grow until the disk is full — which takes out the whole stack, not just the
+# logging. 10MB x 3 per container is roughly 270MB worst case across nine
+# services, against a Loki retention that is measured in days.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   postgres:
     image: postgres:18-alpine
+    # POSTGRES IS THE ONE SERVICE THAT CANNOT EMIT JSON HERE, and it is worth
+    # writing down why rather than leaving it looking like an oversight.
+    #
+    # `log_destination=jsonlog` requires `logging_collector=on` — and the
+    # collector writes to FILES inside the container, so stdout goes silent and
+    # Alloy (and `docker compose logs postgres`) sees nothing at all. The two
+    # requirements are mutually exclusive: structured output, or output Docker
+    # can collect. Collectable wins.
+    #
+    # So Postgres stays on stderr with a pinned line prefix, and Alloy parses it
+    # with one regex (see alloy-config.alloy). The prefix is set explicitly
+    # rather than relying on the image default, because that regex is the only
+    # thing standing between these logs and being unreadable in the Admin tab.
+    command:
+      - postgres
+      - -c
+      - log_destination=stderr
+      - -c
+      - logging_collector=off
+      - -c
+      # QUOTED, for the trailing space. Unquoted, YAML strips it and the prefix
+      # becomes `%m [%p]` — which renders as `[1]LOG:` with no separator, and
+      # Alloy's regex (which expects one) stops matching. The whole of
+      # Postgres then arrives in the Admin tab as unstructured lines.
+      - "log_line_prefix=%m [%p] "
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-seshat}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seshat}
       POSTGRES_DB: ${POSTGRES_DB:-seshat}
+    logging: *logging
     volumes:
       # Postgres 18 moved the recommended mount point up one level: the image
       # now places the cluster in a major-version subdirectory beneath this, so
@@ -45,6 +100,15 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.15.1
+    environment:
+      # Structured logs. The key is `logger.format` — NOT `logger.stdout.format`,
+      # which is a plausible guess that Qdrant accepts silently and ignores,
+      # leaving every line unparsed with nothing to say why. The shape is
+      # documented in the image's own /qdrant/config/config.yaml.
+      # Check with: docker compose logs qdrant --tail 5 | jq .
+      QDRANT__LOG_LEVEL: ${QDRANT_LOG_LEVEL:-INFO}
+      QDRANT__LOGGER__FORMAT: json
+    logging: *logging
     volumes:
       - qdrant:/qdrant/storage
     # ports: ["6333:6333", "6334:6334"]   # 6333 is the dashboard, 6334 is gRPC
@@ -59,6 +123,17 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Substituted into seshat-realm.json by the realm import — the seeded
+      # accounts' passwords are no longer written down in a tracked file.
+      #
+      # READ THIS BEFORE RECREATING THIS CONTAINER. `start-dev` keeps its
+      # database inside the container with no volume, so `docker compose up -d`
+      # that RECREATES keycloak starts from an empty database and imports the
+      # realm again — which re-applies these two passwords. Set them in .env
+      # and keep them there; the defaults below are deliberately useless so
+      # that forgetting is obvious rather than silent.
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-change-me}
+      SEED_GUEST_PASSWORD: ${SEED_GUEST_PASSWORD:-change-me-too}
       # Keycloak lives one level down from the app, at /seshat/auth, and the
       # two settings below do DIFFERENT jobs with the same value:
       #   KC_HTTP_RELATIVE_PATH  where the server routes requests internally
@@ -81,6 +156,12 @@ services:
       # sign-in redirect lands nowhere.
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
+      # Metrics on the management port (9000), under the relative path — see
+      # the health check below and observability/prometheus.yml, which both
+      # learnt that the same way.
+      KC_METRICS_ENABLED: "true"
+      KC_LOG_CONSOLE_OUTPUT: json
+    logging: *logging
     volumes:
       # `z` is an SELinux relabel, and it is not optional on Fedora/RHEL. With
       # SELinux enforcing, a bind mount out of a home directory arrives labelled
@@ -161,6 +242,36 @@ services:
       KEYCLOAK_ISSUER: ${PUBLIC_URL:-http://localhost:8800}/seshat/auth/realms/seshat
       KEYCLOAK_JWKS_URL: http://keycloak:8810/seshat/auth/realms/seshat/protocol/openid-connect/certs
       KEYCLOAK_AUDIENCE: seshat-ui
+
+      # ── The audit trail ────────────────────────────────────────────────────
+      AUDIT_ENABLED: ${AUDIT_ENABLED:-on}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-90}
+      # OFF, deliberately. Every chat turn is recorded — who, when, how long,
+      # which searches it ran — but the PROMPT is kept as a sha-256 prefix and a
+      # length rather than as text, because /chat promises that no transcript is
+      # written server-side. On records the questions verbatim, which is a
+      # change to what the system promises its users, not just a setting.
+      AUDIT_CHAT_PROMPTS: ${AUDIT_CHAT_PROMPTS:-off}
+      # GET /config is polled once a minute per open tab. On, that is a row per
+      # user per minute for ever, burying every row that means something.
+      AUDIT_READS: ${AUDIT_READS:-off}
+      # Off: a full audit queue drops records and counts them. On: it applies
+      # back-pressure instead — slower under load, no gaps.
+      AUDIT_BLOCKING: ${AUDIT_BLOCKING:-off}
+
+      # ── Observability ──────────────────────────────────────────────────────
+      METRICS_ENABLED: ${METRICS_ENABLED:-on}
+      # Where the Admin tab's log and metric panels read from. Blank either of
+      # these (LOKI_URL= in .env) and the gateway reports that feature as
+      # unavailable and the UI hides the panel, rather than rendering a tab that
+      # only ever 503s.
+      LOKI_URL: ${LOKI_URL-http://loki:3100}
+      PROMETHEUS_URL: ${PROMETHEUS_URL-http://prometheus:9090}
+      # json here, text for a bare `java -jar` — see logback.xml. An
+      # unrecognised value makes the process refuse to start rather than run
+      # silently with no appender.
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     # Not root. The UI writes uploaded documents into the mounted folder, and a
     # root-owned container would leave every one of them owned by root on the
     # HOST — files the person who runs this stack then needs sudo to delete.
@@ -181,6 +292,7 @@ services:
       # labelled as it is.
       - ${LIBRARY_DIR:-./library}:/library:z
     # ports: ["8090:8090"]   # direct access for an MCP client or curl
+    logging: *logging
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
       interval: 10s
@@ -207,8 +319,135 @@ services:
       # else the front proxy does. Set BIND_ADDR=0.0.0.0 to expose it directly
       # (a laptop with no proxy in front), knowingly.
       - "${BIND_ADDR:-127.0.0.1}:${SESHAT_PORT:-8800}:80"
+    logging: *logging
+    restart: unless-stopped
+
+  # ── Observability ──────────────────────────────────────────────────────────
+  #
+  # Four containers, roughly 700MB-1GB resident between them. They are part of
+  # the default stack rather than an opt-in profile because the Admin tab is
+  # part of the product now — an administrator whose log view is empty until
+  # they discover a flag has a broken feature, not a lean deployment. To run
+  # without them: `docker compose stop loki alloy prometheus cadvisor` and set
+  # LOKI_URL= and PROMETHEUS_URL= (blank) in .env, which makes the gateway
+  # report those panels as unavailable and the UI hide them.
+
+  loki:
+    image: grafana/loki:3.5.7
+    # -config.expand-env is what lets ${LOG_RETENTION_DAYS} in the config file
+    # come from .env. Without it Loki reads the variable as a literal string
+    # and refuses to start on a duration parse error.
+    command: ["-config.file=/etc/loki/loki.yml", "-config.expand-env=true"]
+    environment:
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/loki.yml:ro,z
+      - loki:/loki
+    # ports: ["3100:3100"]   # the LogQL API, for curl or a local Grafana
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3100/ready | grep -q ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.11.2
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    depends_on:
+      loki: { condition: service_started }
+    # SELINUX. On Fedora/RHEL with SELinux enforcing, a container is confined as
+    # container_t and the Docker socket is labelled container_var_run_t, so
+    # connecting to it is denied — as an AVC in the audit log, and as nothing at
+    # all in the log view, because Alloy then discovers no containers and ships
+    # nothing. The symptom is an empty Admin tab with every service healthy.
+    #
+    #   ausearch -m avc -ts recent | grep docker.sock
+    #
+    # `label=disable` turns off SELinux confinement FOR THIS CONTAINER ONLY. It
+    # is narrower than the `privileged: true` usually suggested, and far
+    # narrower than relabelling the socket with `z` — which would change the
+    # label of the HOST's socket and can break Docker itself. It is still a real
+    # grant, and it stacks with the socket access below; see the README.
+    security_opt:
+      - label=disable
+    volumes:
+      - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro,z
+      # READ ACCESS TO THE DOCKER SOCKET IS CLOSE TO ROOT ON THE HOST. It is
+      # mounted read-only, this container publishes nothing, and it is the
+      # standard way to discover and tail containers — but it is a real
+      # privilege boundary and it belongs in the threat model of anyone
+      # deploying this. The alternative (the Loki log-driver plugin) needs a
+      # host-level install before compose works at all.
+      #
+      # `:ro` is about the FILE, not the connection — a Unix socket needs write
+      # to connect at all, which is exactly what the AVC above denies.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy:/var/lib/alloy/data
+    logging: *logging
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${METRICS_RETENTION_DAYS:-15}d
+      - --web.enable-lifecycle
+      - --log.format=json
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - prometheus:/prometheus
+    # ports: ["9090:9090"]   # the expression browser, while developing
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  cadvisor:
+    # Note that cAdvisor skips version numbers — there is no v0.53.x on gcr.io
+    # at all, and a plausible-looking tag simply fails to resolve.
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    # THE FUSSIEST CONTAINER HERE. On a cgroup-v2 host with SELinux enforcing
+    # (Fedora, RHEL) it needs all of these mounts and, in practice, privileged
+    # — without which it starts and then reports nothing, which looks like a
+    # Prometheus problem rather than a cAdvisor one. If it will not run
+    # cleanly on your host, stop it: the gateway's own metrics and the whole
+    # log half of the Admin tab work without it, and only the per-container
+    # CPU and memory panels go empty.
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    command:
+      - --housekeeping_interval=15s
+      - --docker_only=true
+      # Two labels, not all of them: cAdvisor turns every container label into
+      # a Prometheus label, and a stack with rich labels becomes a cardinality
+      # problem the first time it is scraped.
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service,com.docker.compose.project
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    logging: *logging
     restart: unless-stopped
 
 volumes:
   postgres:
   qdrant:
+  loki:
+  prometheus:
+  alloy:

@@ -968,3 +968,477 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
     border: 0;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE ADMIN TAB
+
+   A different kind of surface from the chat: dense, monospaced, scannable
+   rather than readable. The pigment discipline still holds —
+
+     RUBRIC marks what must not be misread. Here that is exactly one thing:
+     an error or a denied action. Warnings take gold, `up`/`ok` takes faience.
+     If two things are red, neither is the signal.
+
+     FAIENCE is interaction, as everywhere else: the active tab, the live
+     toggle, a clickable request id.
+
+     ORPIMENT (--line) is geometry only — gridlines, row rules, the hairline
+     under a column head. Never type, never a fill.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── the Chat / Admin switch ───────────────────────────────────────────── */
+
+.viewtabs {
+  display: flex;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex: none;
+}
+
+.viewtabs button {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0.3125rem 0.75rem;
+  border-radius: 0;
+  transition: color var(--speed), background var(--speed);
+}
+
+.viewtabs button + button { border-left: 1px solid var(--line-soft); }
+.viewtabs button:hover { color: var(--faience); }
+.viewtabs button.on { color: var(--ground); background: var(--faience); }
+
+/* ── the admin surface ─────────────────────────────────────────────────── */
+
+.admin {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  font-family: var(--f-ui);
+}
+
+.subtabs {
+  display: flex;
+  gap: 1.25rem;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--line-soft);
+  flex: none;
+}
+
+.subtabs button {
+  font-family: var(--f-data);
+  font-size: var(--t-label);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  padding: 0.625rem 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.subtabs button:hover { color: var(--ink-2); }
+.subtabs button.on { color: var(--ink); border-bottom-color: var(--rubric); }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 1.25rem 1.5rem;
+}
+
+.panel-foot {
+  flex: none;
+  border-top: 1px solid var(--line-soft);
+  padding: 0.5rem 1.25rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+/* ── filters ───────────────────────────────────────────────────────────── */
+
+.filters {
+  flex: none;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.filter-row .spacer { flex: 1; }
+
+/* A segmented control, not a dropdown: five fixed values, used constantly,
+   and one click should move it. */
+.seg {
+  display: flex;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex: none;
+}
+
+.seg button {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.seg button + button { border-left: 1px solid var(--line-soft); }
+.seg button:hover { color: var(--ink); background: var(--surface-2); }
+.seg button.on { color: var(--ground); background: var(--ink-2); }
+.seg button.on.lv-warn, .seg button.on.oc-denied { background: var(--gold); }
+.seg button.on.lv-error, .seg button.on.lv-fatal, .seg button.on.oc-error { background: var(--rubric); }
+.seg button.on.oc-ok { background: var(--faience); }
+
+.field {
+  font-family: var(--f-data);
+  font-size: var(--t-label);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 0.3125rem 0.5rem;
+  min-width: 0;
+}
+
+.field.slim { width: 9rem; }
+.field.grow { flex: 1; min-width: 12rem; }
+.field::placeholder { color: var(--ink-3); }
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.chips-label {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.chip.on {
+  color: var(--faience);
+  border-color: var(--faience);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.chips .kill, .pin .kill {
+  display: inline-flex;
+  color: inherit;
+  opacity: 0.6;
+  padding: 0;
+}
+
+.chips .kill:hover, .pin .kill:hover { opacity: 1; }
+
+.pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--faience);
+  border-radius: var(--radius);
+  color: var(--faience);
+  font-size: var(--t-label);
+}
+
+.hint {
+  font-family: var(--f-ui);
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+}
+
+.hint.mono, .mono { font-family: var(--f-data); }
+.dim { color: var(--ink-3); }
+.num { text-align: right; }
+
+/* ── notices ───────────────────────────────────────────────────────────── */
+
+.notice {
+  flex: none;
+  margin: 0.75rem 1.25rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--line);
+  background: var(--surface);
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  color: var(--ink-2);
+  text-align: left;
+  width: calc(100% - 2.5rem);
+}
+
+.notice.error { border-left-color: var(--rubric); color: var(--ink); }
+.notice.warn { border-left-color: var(--gold); }
+.notice.pending { border-left-color: var(--faience); cursor: pointer; }
+.notice.pending:hover { color: var(--ink); }
+
+/* ── records ───────────────────────────────────────────────────────────── */
+
+.records { padding-top: 0.5rem; }
+
+.rec-head, .rec-line {
+  display: grid;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.25rem 0;
+  min-width: 0;
+}
+
+.rec-head {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--ground);
+  z-index: 1;
+}
+
+.rec { border-bottom: 1px solid var(--line-soft); }
+
+.rec-line {
+  width: 100%;
+  text-align: left;
+  font-size: var(--t-small);
+  font-family: var(--f-ui);
+  border-radius: 0;
+  /* A row is a button so it is reachable by keyboard; it must not look like
+     one until it is hovered. */
+  border-left: 2px solid transparent;
+  padding-left: 0.5rem;
+  margin-left: -0.5rem;
+}
+
+.rec-line:hover { background: var(--surface); }
+.rec-line.open { background: var(--surface); }
+
+.rec.lv-warn .rec-line { border-left-color: var(--gold); }
+.rec.lv-error .rec-line, .rec.lv-fatal .rec-line { border-left-color: var(--rubric); }
+.rec.oc-denied .rec-line { border-left-color: var(--gold); }
+.rec.oc-error .rec-line { border-left-color: var(--rubric); }
+
+.rec-line .msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.rec-line.open .msg { white-space: normal; overflow: visible; }
+
+.badge {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.0625rem 0.3125rem;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.badge.lv-warn, .badge.oc-denied { color: var(--gold); }
+.badge.lv-error, .badge.lv-fatal, .badge.oc-error { color: var(--rubric); }
+.badge.oc-ok { color: var(--faience); }
+.badge.raw { color: var(--ink-3); margin-right: 0.375rem; }
+
+.rec-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.125rem;
+  margin: 0 0 0.625rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border-left: 2px solid var(--line);
+  font-size: var(--t-small);
+}
+
+.rec-detail > div {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.rec-detail dt {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.rec-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.rec-detail code, .qry, .rec-json {
+  font-family: var(--f-data);
+  font-size: var(--t-label);
+  color: var(--ink-2);
+}
+
+.rec-pre {
+  margin: 0;
+  font-family: var(--f-data);
+  font-size: var(--t-label);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.qry {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.link {
+  color: var(--faience);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  padding: 0;
+  font: inherit;
+}
+
+.rec-note, .rec-more {
+  padding: 0.75rem 0;
+  font-family: var(--f-ui);
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+}
+
+.rec-more { display: flex; justify-content: center; }
+
+.empty-state {
+  padding: 3rem 1.25rem;
+  text-align: center;
+  font-family: var(--f-ui);
+  font-size: var(--t-small);
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* ── charts ────────────────────────────────────────────────────────────── */
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 1.5rem 1.75rem;
+  padding-top: 1rem;
+}
+
+.chart { margin: 0; min-width: 0; }
+
+.chart figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin-bottom: 0.375rem;
+  min-width: 0;
+}
+
+.chart h4 {
+  font-family: var(--f-data);
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.spark svg { width: 100%; height: auto; display: block; }
+.spark .grid { stroke: var(--line-soft); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark .axis { fill: var(--ink-3); font-family: var(--f-data); font-size: 9px; }
+
+.legend {
+  list-style: none;
+  margin: 0.375rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+}
+
+.legend li { display: flex; align-items: center; gap: 0.375rem; min-width: 0; }
+.legend i { width: 0.625rem; height: 2px; flex: none; }
+.legend b { color: var(--ink-2); font-weight: 400; }
+
+/* ── services ──────────────────────────────────────────────────────────── */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+  padding-top: 1rem;
+}
+
+.card.svc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line-soft);
+  border-left-width: 2px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.card.svc.up { border-left-color: var(--faience); }
+.card.svc.down { border-left-color: var(--rubric); }
+.card.svc b { font-family: var(--f-data); font-size: var(--t-small); font-weight: 600; }
+.card.svc code {
+  font-family: var(--f-data);
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.card.svc .badge { align-self: flex-start; margin-top: 0.25rem; }
+
+@media (max-width: 60rem) {
+  .rec-head { display: none; }
+  .rec-line { grid-template-columns: minmax(0, 1fr) !important; gap: 0.125rem; }
+  .rec-detail > div { grid-template-columns: minmax(0, 1fr); }
+  .viewtabs button { padding: 0.3125rem 0.5rem; }
+}

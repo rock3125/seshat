@@ -1,0 +1,69 @@
+# Loki, single binary, on the filesystem.
+#
+# There is no cluster here and there will not be one: this is the log store for
+# a nine-container stack on one host, and every setting below is chosen to keep
+# it that way — one replica, an in-memory ring, and chunks in a Docker volume.
+#
+# Started with `-config.expand-env=true`, which is what lets ${LOG_RETENTION_DAYS}
+# below come from .env. Without that flag the variable is read as a literal
+# string and Loki refuses to start with a duration parse error.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  # JSON, like everything else in the stack — Loki's own logs are collected by
+  # Alloy and read in the same Admin tab as the rest.
+  log_format: json
+  # Loki is conversational at info about every flush and compaction. On a stack
+  # this size that is the majority of all log volume, and none of it is about
+  # the application.
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-04-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: ${LOG_RETENTION_DAYS:-14}d
+  # Structured metadata is what keeps `user`, `req`, `logger` and the rest
+  # filterable WITHOUT being indexed labels. It is the whole reason the label
+  # set in alloy-config.alloy can stay down to two: a high-cardinality label
+  # (a request id, a username) is how a small Loki becomes an unusable one.
+  allow_structured_metadata: true
+  volume_enabled: true
+  # A container that has been down and comes back may ship a backlog. Rejecting
+  # it would lose exactly the logs from the incident being investigated.
+  reject_old_samples: false
+  max_query_length: 168h        # one week, matching the gateway's own cap
+  max_query_series: 5000
+
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
+  # Without this, retention_period above is a statement of intent and nothing
+  # deletes anything — the volume grows until the disk is full.
+  retention_enabled: true
+  compaction_interval: 10m
+
+analytics:
+  reporting_enabled: false

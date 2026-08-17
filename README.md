@@ -24,15 +24,26 @@ dropped into `library/` by hand are picked up within a minute.
 
 ## What it is
 
-Five containers, and one published port.
+Nine containers, and one published port.
 
 | Service | What it is | Why |
 |---|---|---|
 | `ui` | nginx | The only public entrance. Serves the SPA and reverse-proxies the other two browser-facing services, so everything is one origin under `/seshat`. |
-| `gateway` | one Kotlin fat jar | Both the MCP server and the chat gateway. Reads the library, chunks it, indexes it, searches it, and streams Gemini's answers over those same tools. |
-| `postgres` | Postgres 18 | The chunks, and the document registry the scanner diffs a folder against. |
+| `gateway` | one Kotlin fat jar | Both the MCP server and the chat gateway. Reads the library, chunks it, indexes it, searches it, and streams Gemini's answers over those same tools. Also keeps the audit trail and serves the admin API. |
+| `postgres` | Postgres 18 | The chunks, the document registry the scanner diffs a folder against, and the audit trail. |
 | `qdrant` | Qdrant | The vectors: dense (Gemini embeddings) and sparse (BM25). |
 | `keycloak` | Keycloak 26 | Identity. The gateway verifies its tokens; the SPA redirects to it. |
+| `loki` | Loki | The log store. |
+| `alloy` | Grafana Alloy | Tails every container above and ships it to Loki. |
+| `prometheus` | Prometheus | Scrapes everything that exposes metrics. |
+| `cadvisor` | cAdvisor | Per-container CPU, memory, network and disk, for Prometheus. |
+
+The last four are the [Admin tab](#administration-auditing-logs-and-metrics)'s
+supply. They publish nothing: the browser reaches logs and metrics through the
+gateway's admin API, which checks a Keycloak role first. They add roughly
+700MB–1GB of resident memory between them; `docker compose stop loki alloy
+prometheus cadvisor` with `LOKI_URL=` and `PROMETHEUS_URL=` blank in `.env`
+leaves the audit trail working and hides the rest of the tab.
 
 The gateway being one process rather than two is the main structural decision.
 An MCP server and a chat gateway that calls MCP tools need exactly the same
@@ -173,20 +184,42 @@ with an admin token is its interface.
 ## Auth
 
 Keycloak realm `seshat`, imported on first boot from
-`keycloak/seshat-realm.json`. Two realm roles: `use-ui` (required for
-everything, carried by the realm default role so any new account can sign in)
-and `admin` (additionally required to add documents to the library and to run
-`POST /reindex`).
+`keycloak/seshat-realm.json`. Three realm roles:
 
-| User | Email | Password | Roles |
-|---|---|---|---|
-| rock | peter@peter.co.nz | `$DangerMouse` | use-ui, admin |
+| Role | Grants |
+|---|---|
+| `use-ui` | Required for everything. Carried by the realm default role, so any new account can sign in and search without being granted anything. |
+| `admin-observability` | The Admin tab: the audit trail, the consolidated container logs, and the metrics panels. |
+| `admin` | Adding documents to the library and running `POST /reindex`. **Composite** — it carries `use-ui` and `admin-observability`, so one grant is the whole administrator. |
 
-One seeded account, in the `/admins` group. Sign in with either the username or
-the email — `loginWithEmailAllowed` is on. Everyone else is added in the admin
-console; the realm's default role carries `use-ui`, so a new account can sign in
-and search without being granted anything, and needs `admin` only to add
-documents.
+The two capabilities come apart on purpose. `admin-observability` alone is an
+auditor who can read what everyone did but cannot change the corpus — an
+assignment in Keycloak (the `/auditors` group), not a change to any code.
+
+| User | Group | Roles |
+|---|---|---|
+| rock | `/admins` | use-ui, admin, admin-observability |
+| guest | `/readers` | use-ui |
+
+**The seeded passwords are not in this repository.** They are
+`${SEED_ADMIN_PASSWORD}` and `${SEED_GUEST_PASSWORD}` placeholders in the realm
+file, substituted at import time from `.env`. Set both there before first boot:
+
+```bash
+SEED_ADMIN_PASSWORD='...'     # quote it — compose interpolates this file, so a
+SEED_GUEST_PASSWORD='...'     # bare $secret is read as a variable and arrives empty
+```
+
+Two things about that which cost an hour each if discovered later. The
+substitution is `${VAR}`, and an **unset** variable is left in place as the
+literal string `${SEED_ADMIN_PASSWORD}` — so the defaults in the realm file are
+`change-me` and `change-me-too`, which are useless on purpose rather than
+silently wrong. And Keycloak's `start-dev` keeps its database **inside the
+container with no volume**, so recreating the keycloak container re-imports the
+realm and re-applies these two passwords; a password changed only in the console
+does not survive that.
+
+Sign in with either the username or the email — `loginWithEmailAllowed` is on.
 
 The Keycloak admin console is at `/seshat/auth/admin/`. Its password is `admin`
 when you start the stack by hand, and a generated one when `install.sh` sets it
@@ -204,6 +237,129 @@ JWKS URL is where the gateway container fetches the signing keys, and it cannot
 use the public URL — inside the compose network that resolves to the gateway
 itself. So the issuer is `${PUBLIC_URL}/seshat/auth/realms/seshat` and the JWKS
 URL goes direct to `http://keycloak:8810/...`.
+
+## Administration: auditing, logs and metrics
+
+Administrators get a second tab beside Chat. It is rendered only for accounts
+the **server** says may have it (`GET /config` answers `admin.may_audit`), and
+every route behind it re-checks the role — the UI decides what to draw, never
+what is allowed.
+
+Four panels, and one filter shared between the first two: **severity · who ·
+when · where · search**. A reader who has learnt the filters in the log view has
+learnt them in the audit view.
+
+**Logs.** Every container's output in one place, from Loki. `level` is a
+**floor** — `warn` returns warnings *and* errors *and* fatals, because a reader
+filters to `warn` precisely when they are looking for trouble. Records are
+structured, not lines: fixed columns, and a row expands to every field the
+service emitted. Live tail is a toggle; scrolling away pauses it and counts what
+arrived rather than yanking the view out from under you.
+
+**Audit.** Every user action: who, when, from where, how long it took, what it
+touched, and whether it was allowed. That includes refusals — someone probing an
+admin API they do not hold the role for is exactly what this table is for.
+
+**Metrics.** A dozen named panels over Prometheus. The browser asks for a panel
+by *name* and never composes PromQL; the queries live in `Panels` in
+`Observability.kt`. Same for LogQL — the filter goes over the wire, the query is
+built server-side.
+
+**Services.** Which scrape targets Prometheus can currently reach.
+
+Logs and audit rows are joined by a **request id**. One id per request goes onto
+the audit row and, through the MDC, onto every log line that request produced —
+so clicking it in either view shows a failed action and its log lines together.
+
+### What is recorded, and what is not
+
+`session.start`, `auth.denied` (with the reason, never the credential),
+`chat.turn`, `tool.search`, `tool.load_chunk`, `chunk.view`, `library.upload`,
+`library.reindex`, `mcp.call`, and every `admin.*` read.
+
+**Chat prompts are hashed by default.** `/chat` promises that no transcript is
+written server-side — the browser owns the history — and auditing the questions
+verbatim would reverse that. So the *turn* is always recorded (who, when, how
+long, how many tool calls) while the prompt is kept as a sha-256 prefix and a
+character count. `AUDIT_CHAT_PROMPTS=on` records them in full; that is a change
+to what the system promises its users, and they should be told.
+
+The **search queries** the model ran *are* recorded in full either way. They run
+against one shared corpus that everyone signed in can read, so what the library
+was asked for is the thing an administrator actually needs to see.
+
+`GET /config` is not audited — the UI polls it once a minute per open tab, and a
+row per user per minute would bury everything that means something.
+`AUDIT_READS=on` if a deployment must have it.
+
+Nothing secret reaches the table: `Audit.sanitize` redacts by key name
+(authorization, token, password, secret, api_key, …), truncates long strings and
+caps the field count, on every record, so a route cannot leak a credential into
+a table that administrators read. It has its own tests.
+
+### How the logs get there
+
+Every container emits **JSON on stdout**, so the pipeline ships fields rather
+than a regex's guess at them. Grafana Alloy discovers the containers over the
+Docker socket, tails them, normalises nine services' idea of a log line into
+`ts` / `level` / `service` / `msg`, and writes to Loki. That normalisation lives
+in `observability/alloy-config.alloy` and nowhere else — doing it downstream
+would mean doing it twice and getting it inconsistent.
+
+Two services cannot comply, and are marked `raw` in the UI rather than dressed
+up with invented fields:
+
+- **Postgres** — `log_destination=jsonlog` *requires* `logging_collector=on`,
+  and the collector writes to files inside the container, so stdout goes silent.
+  Structured output or collectable output; collectable wins. It stays on stderr
+  with a pinned `log_line_prefix`, and Alloy parses it with the one regex in
+  that file.
+- **cAdvisor** — logs through glog, which has no JSON mode.
+
+To read the containerised logs at a terminal, where JSON is a downgrade:
+
+```bash
+docker compose logs gateway | jq -r '"\(.ts) \(.level) \(.logger) \(.msg)"'
+```
+
+`LOG_FORMAT=text` restores plain lines; it is the default for a bare
+`java -jar`, and compose sets `json`. An unrecognised value makes the gateway
+**refuse to start** rather than run silently with no appender — `logback.xml`
+names its appenders after the values this takes.
+
+### Privileges these containers hold
+
+Worth stating plainly, because both are real and neither is obvious:
+
+- **alloy** mounts `/var/run/docker.sock`. Read access to the Docker socket is
+  close to root on the host. It is mounted read-only, the container publishes
+  nothing, and it is the standard way to discover and tail containers — the
+  alternative (Loki's log-driver plugin) needs a `docker plugin install` on the
+  host before `docker compose up` works at all. On SELinux hosts it also needs
+  `security_opt: label=disable`, because a confined `container_t` process may
+  not connect to a `container_var_run_t` socket. Without it Alloy discovers
+  nothing and the log view is empty with every service healthy —
+  `ausearch -m avc -ts recent | grep docker.sock` is what says so.
+- **cadvisor** runs `privileged` with `/`, `/sys` and `/var/lib/docker` mounted
+  read-only. It is the fussiest container in the stack on a cgroup-v2 SELinux
+  host. If it will not run cleanly, stop it: only the per-container CPU and
+  memory panels go empty, and everything else — including the whole log and
+  audit half of the tab — is unaffected.
+
+The gateway's `/metrics` is unauthenticated, because Prometheus holds no token
+and giving it one would mean a service-account client and a credential in the
+scrape config to protect a document saying how many chunks are indexed. The
+control is reachability: the gateway's port is not published, and
+`ui/nginx.conf` returns 404 for `/seshat/api/metrics` so the proxy that *is*
+published cannot be a way in.
+
+### Retention
+
+`AUDIT_RETENTION_DAYS` (90) sweeps the audit table daily; `LOG_RETENTION_DAYS`
+(14) is Loki's; `METRICS_RETENTION_DAYS` (15) is Prometheus'. Every container
+also has `json-file` rotation at 10MB × 3, because Alloy tails those files and
+without a cap the first symptom is a full disk.
+
 
 ## Deploying to another machine
 
@@ -287,6 +443,15 @@ volume and re-index.
 fallback — and is stamped into each document's chunker signature, so changing
 it re-chunks the corpus on the next scan rather than leaving it half one shape
 and half another.
+
+`SEED_ADMIN_PASSWORD` and `SEED_GUEST_PASSWORD` are read only when the realm is
+first imported, and again whenever the keycloak container is recreated. Quote
+any value containing a `$`.
+
+`AUDIT_CHAT_PROMPTS` is the one setting here that changes what the system
+promises the people using it, rather than how it runs. Off, a chat turn is
+recorded without its question; on, the questions are readable by every
+administrator. See [Administration](#administration-auditing-logs-and-metrics).
 
 ## Development
 

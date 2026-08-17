@@ -4,6 +4,7 @@ import Rail from './components/Rail'
 import SourcesDrawer from './components/SourcesDrawer'
 import Transcript from './components/Transcript'
 import { AutoIcon, MoonIcon, RailIcon, SourcesIcon, SunIcon } from './components/icons'
+import AdminView from './features/admin/AdminView'
 import { fetchConfig } from './api/gateway'
 import { NARROW, useMediaQuery } from './hooks/useMediaQuery'
 import { abortTurn, sendMessage } from './features/chat/sendMessage'
@@ -17,9 +18,14 @@ const THEMES: Theme[] = ['system', 'light', 'dark']
 export default function App() {
   const dispatch = useAppDispatch()
   const { activeId, byId } = useAppSelector((s) => s.conversations)
-  const { railOpen, drawerOpen, focusedChunk, theme } = useAppSelector((s) => s.ui)
+  const { railOpen, drawerOpen, focusedChunk, theme, view } = useAppSelector((s) => s.ui)
   const [config, setConfig] = useState<ServerConfig | null>(null)
   const [configError, setConfigError] = useState<string | null>(null)
+
+  // What the SERVER says this caller may do. Every /admin route enforces the
+  // same thing, so this only decides what to render — a user who edits their
+  // token gets a 403, not a tab.
+  const mayAudit = config?.admin?.may_audit === true
 
   const conversation = activeId ? byId[activeId] ?? null : null
   const busy = conversation?.messages.at(-1)?.streaming === true
@@ -69,6 +75,21 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [refreshConfig])
 
+  // On EVERY config refresh, not just the first: a role revoked while the tab
+  // is open should close the Admin view within the minute, rather than leaving
+  // someone looking at a panel whose every request has started 403ing.
+  useEffect(() => {
+    if (config && !mayAudit && view === 'admin') dispatch(uiActions.setView('chat'))
+  }, [config, mayAudit, view, dispatch])
+
+  // Deep links land in the right place: an administrator following
+  // …/seshat/#admin/logs?level=error from a colleague opens on that view.
+  useEffect(() => {
+    if (mayAudit && window.location.hash.startsWith('#admin')) {
+      dispatch(uiActions.setView('admin'))
+    }
+  }, [mayAudit, dispatch])
+
   function ask(prompt: string) {
     // `store.getState` is passed as an arrow rather than as the bare method:
     // detached from its object it would be called with the wrong `this`.
@@ -110,6 +131,30 @@ export default function App() {
             {config ? <span>{config.model}</span> : null}
           </div>
 
+          {/* Only for accounts that hold the role. Rendered between the eyebrow
+              and the spacer so it sits with the identity of the page rather
+              than among the icon controls, which are per-view settings. */}
+          {mayAudit ? (
+            <nav className="viewtabs" aria-label="View">
+              <button
+                type="button"
+                className={view === 'chat' ? 'on' : ''}
+                onClick={() => dispatch(uiActions.setView('chat'))}
+                aria-current={view === 'chat' ? 'page' : undefined}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                className={view === 'admin' ? 'on' : ''}
+                onClick={() => dispatch(uiActions.setView('admin'))}
+                aria-current={view === 'admin' ? 'page' : undefined}
+              >
+                Admin
+              </button>
+            </nav>
+          ) : null}
+
           <div className="spacer" />
 
           <button
@@ -125,34 +170,44 @@ export default function App() {
             {theme === 'light' ? <SunIcon size={17} /> : theme === 'dark' ? <MoonIcon size={17} /> : <AutoIcon size={17} />}
           </button>
 
-          <button
-            type="button"
-            className={`icon-button${drawerOpen ? ' on' : ''}`}
-            onClick={() => dispatch(uiActions.toggleDrawer())}
-            title="Sources"
-            aria-label={drawerOpen ? 'Hide sources' : 'Show sources'}
-          >
-            <SourcesIcon size={17} />
-          </button>
+          {view === 'chat' ? (
+            <button
+              type="button"
+              className={`icon-button${drawerOpen ? ' on' : ''}`}
+              onClick={() => dispatch(uiActions.toggleDrawer())}
+              title="Sources"
+              aria-label={drawerOpen ? 'Hide sources' : 'Show sources'}
+            >
+              <SourcesIcon size={17} />
+            </button>
+          ) : null}
         </header>
 
-        <Transcript conversation={conversation} config={config} onAsk={ask} />
+        {view === 'admin' && config?.admin ? (
+          <AdminView policy={config.admin} />
+        ) : (
+          <>
+            <Transcript conversation={conversation} config={config} onAsk={ask} />
 
-        <Composer
-          onSend={ask}
-          onStop={abortTurn}
-          busy={busy}
-          disabledReason={
-            configError
-              ? 'The gateway is unreachable — check that it is running'
-              : config && !config.chat_enabled
-                ? 'GEMINI_API_KEY is not set on the gateway'
-                : undefined
-          }
-        />
+            <Composer
+              onSend={ask}
+              onStop={abortTurn}
+              busy={busy}
+              disabledReason={
+                configError
+                  ? 'The gateway is unreachable — check that it is running'
+                  : config && !config.chat_enabled
+                    ? 'GEMINI_API_KEY is not set on the gateway'
+                    : undefined
+              }
+            />
+          </>
+        )}
       </main>
 
-      {drawerOpen ? <SourcesDrawer passages={passages} focused={focusedChunk} /> : null}
+      {drawerOpen && view === 'chat'
+        ? <SourcesDrawer passages={passages} focused={focusedChunk} />
+        : null}
 
       {/* On a narrow screen the rail and the drawer are overlays; a tap outside
           should dismiss them, the way every drawer on a phone does. */}

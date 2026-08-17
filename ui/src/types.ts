@@ -57,6 +57,27 @@ export interface ServerConfig {
    *  arrival time rather than an unexplained wait. */
   scan_minutes: number
   upload: UploadPolicy
+  admin: AdminPolicy
+}
+
+/**
+ * What this caller may do in the Admin tab, decided server-side — the same
+ * principle as [UploadPolicy].
+ *
+ * `features` is separate from the capability on purpose: an administrator on a
+ * deployment with no Loki behind it still holds the role, and the right answer
+ * is to hide that panel rather than render one that only ever 503s.
+ */
+export interface AdminPolicy {
+  /** May change the corpus: upload, reindex. */
+  is_admin: boolean
+  /** May read the audit trail, the logs and the metrics. */
+  may_audit: boolean
+  features: {
+    audit: boolean
+    logs: boolean
+    metrics: boolean
+  }
 }
 
 /** What this signed-in caller may add to the library, decided server-side. */

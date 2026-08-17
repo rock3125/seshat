@@ -1,0 +1,213 @@
+// Grafana Alloy: discover every container in this compose project, tail its
+// logs, and normalise nine services' idea of a log line into one shape.
+//
+// Alloy rather than Promtail because Promtail is deprecated; Alloy rather than
+// Loki's Docker log-driver plugin because that plugin has to be installed on
+// the HOST with `docker plugin install` before `docker compose up` works at
+// all, which would break the one-command start the README promises.
+//
+// THE NORMALISATION LIVES HERE, ONCE. Postgres calls the timestamp
+// `timestamp` and the severity `error_severity`; Keycloak calls them
+// `timestamp` and `level`; nginx's access log has no severity at all. Every
+// one of those is mapped below so that everything downstream — the gateway's
+// query builder, the admin API, the browser — only ever sees ts, level,
+// service and msg. Doing this later, in the gateway or in React, would mean
+// writing it twice and getting it inconsistent.
+
+logging {
+  level  = "warn"
+  format = "json"
+}
+
+// --- discovery ---------------------------------------------------------------
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "10s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Only this stack. The socket shows every container on the host, and logs
+  // from somebody else's database have no business in Seshat's audit view.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "seshat"
+    action        = "keep"
+  }
+
+  // The compose service name becomes the `service` label — the one label the
+  // whole Admin tab filters on.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  forward_to       = [loki.process.normalise.receiver]
+  refresh_interval = "10s"
+}
+
+// --- normalisation -----------------------------------------------------------
+
+loki.process "normalise" {
+
+  // The shape most of the stack already emits: the gateway (logback + the
+  // logstash encoder), Loki, Prometheus and Alloy itself.
+  stage.json {
+    expressions = {
+      ts     = "ts",
+      level  = "level",
+      msg    = "msg",
+      logger = "logger",
+      user   = "user",
+      req    = "req",
+      route  = "route",
+      status = "status",
+    }
+  }
+
+  // Keycloak: KC_LOG_CONSOLE_OUTPUT=json.
+  stage.match {
+    selector = "{service=\"keycloak\"}"
+    stage.json {
+      expressions = {
+        ts     = "timestamp",
+        level  = "level",
+        msg    = "message",
+        logger = "loggerName",
+      }
+    }
+  }
+
+  // Postgres, and the one regex in this file.
+  //
+  // It cannot emit JSON to stdout at all: `log_destination=jsonlog` requires
+  // `logging_collector=on`, and the collector writes to files inside the
+  // container rather than to stdout, so choosing JSON means choosing logs
+  // Docker cannot collect. See the comment in docker-compose.yml.
+  //
+  // The format is pinned by `log_line_prefix=%m [%p]` there, so this matches:
+  //
+  //   2026-08-17 05:47:18.025 UTC [787] FATAL:  password authentication failed
+  //
+  // Severity runs LOG / NOTICE / WARNING / ERROR / FATAL / PANIC, plus the
+  // DETAIL / HINT / STATEMENT continuation lines, which arrive as their own
+  // entries. All of them land on the common ladder below; anything
+  // unrecognised becomes `info` rather than being dropped.
+  stage.match {
+    selector = "{service=\"postgres\"}"
+    stage.regex {
+      expression = "(?s)^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+ \\S+) \\[(?P<pid>\\d+)\\] (?P<level>[A-Z0-9]+):\\s+(?P<msg>.*)$"
+    }
+    // Replace the stored line with just the message. The timestamp, pid and
+    // severity are fields now, and repeating them inside the message column
+    // means every Postgres row in the Admin tab wastes its width restating the
+    // two columns beside it. A line the regex did NOT match is left alone.
+    stage.output {
+      source = "msg"
+    }
+  }
+
+  // Qdrant: QDRANT__LOGGER__FORMAT=json (the key matters — see compose).
+  //
+  // Its shape is tracing-rs's, so the message is NESTED: `fields.message`, not
+  // `message`. A top-level `message` expression finds nothing, produces an
+  // empty msg, and leaves a log view full of blank rows that read as a bug in
+  // the UI rather than a wrong path here. The expressions are JMESPath, so the
+  // dotted path is all it takes.
+  stage.match {
+    selector = "{service=\"qdrant\"}"
+    stage.json {
+      expressions = {
+        ts     = "timestamp",
+        level  = "level",
+        msg    = "fields.message",
+        logger = "target",
+      }
+    }
+  }
+
+  // nginx: the json_combined format in ui/nginx.conf. An access log has no
+  // severity, so one is assigned — and `status` carries the real signal, which
+  // is why it is lifted into structured metadata below.
+  stage.match {
+    selector = "{service=\"ui\"}"
+    stage.json {
+      expressions = {
+        ts     = "ts",
+        msg    = "request",
+        status = "status",
+        req    = "request_id",
+      }
+    }
+  }
+
+  // Keep what the service actually called it, before the ladder flattens it.
+  // An administrator looking at a Postgres line should still be able to see
+  // that it said PANIC and not merely `fatal`.
+  stage.template {
+    source   = "level_raw"
+    template = "{{ .level }}"
+  }
+
+  // ONE SEVERITY LADDER: debug < info < warn < error < fatal.
+  //
+  // Everything above feeds into this, and the gateway's `level` filter is a
+  // FLOOR over it — level=warn returns warn, error and fatal. Anything
+  // unrecognised becomes `info` rather than being dropped: a line with a
+  // severity nobody predicted should still be readable, just not alarming.
+  stage.template {
+    source   = "level"
+    template = "{{ $l := ToLower (.Value | default \"info\") }}{{ if or (eq $l \"warn\") (eq $l \"warning\") }}warn{{ else if or (eq $l \"error\") (eq $l \"err\") (eq $l \"severe\") }}error{{ else if or (eq $l \"fatal\") (eq $l \"panic\") (eq $l \"critical\") (eq $l \"crit\") (eq $l \"emerg\") (eq $l \"alert\") }}fatal{{ else if or (eq $l \"debug\") (eq $l \"trace\") }}debug{{ else }}info{{ end }}"
+  }
+
+  // The line's OWN time, not the time Alloy happened to read it. Without this
+  // a container restart ships its whole backlog stamped with one instant, and
+  // every date filter in the Admin tab then lies about when things happened.
+  //
+  // `fudge` rather than `skip`: a line whose timestamp will not parse keeps a
+  // near-enough time and stays in the log view. Dropping it would mean the one
+  // malformed line — usually the interesting one — is the one that vanishes.
+  stage.timestamp {
+    source            = "ts"
+    format            = "RFC3339Nano"
+    fallback_formats  = ["RFC3339", "2006-01-02 15:04:05.000 MST", "2006-01-02T15:04:05.000000Z07:00", "UnixMs"]
+    action_on_failure = "fudge"
+  }
+
+  // LABELS: `level` only. `service` is already a stream label from discovery
+  // above. Nothing else may be added here — Loki indexes labels, and `user` or
+  // `req` as a label is the high-cardinality mistake that turns a small
+  // deployment into a slow one. They go below instead.
+  stage.labels {
+    values = { level = "level" }
+  }
+
+  // Structured metadata: filterable, not indexed. This is where `user` and
+  // `req` live, and `req` is the same id the gateway writes onto its audit
+  // rows — one value, two views, joined in the Admin tab.
+  stage.structured_metadata {
+    values = {
+      user      = "user",
+      req       = "req",
+      logger    = "logger",
+      route     = "route",
+      status    = "status",
+      level_raw = "level_raw",
+      pid       = "pid",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

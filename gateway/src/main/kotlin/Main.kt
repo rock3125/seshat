@@ -17,6 +17,18 @@ import org.slf4j.LoggerFactory
  * mistake and silently indexes nothing.
  */
 fun main() {
+    // BEFORE the first logger is touched, because this decides whether there
+    // will be any logging at all. logback.xml names its appenders after the
+    // values LOG_FORMAT takes and refers to one by substitution, so an
+    // unrecognised value silently produces a root logger with no appender —
+    // a service that runs perfectly and says nothing, which is the worst way
+    // to be misconfigured. Refusing to start is the kinder failure.
+    val format = System.getenv("LOG_FORMAT")?.trim()?.lowercase().orEmpty()
+    if (format.isNotEmpty() && format != "json" && format != "text") {
+        System.err.println("FATAL LOG_FORMAT='$format' is not 'json' or 'text'.")
+        kotlin.system.exitProcess(2)
+    }
+
     val log = LoggerFactory.getLogger("seshat")
     val cfg = Config.fromEnv()
 
@@ -27,11 +39,14 @@ fun main() {
             "indexing will fail until it is (set it in .env and restart)")
     }
 
+    val metrics = Metrics(cfg.metricsEnabled)
     val db = Db(cfg).apply { migrate() }
     val store = Store(cfg).apply { ensureCollection() }
-    val embeddings = Embeddings(cfg)
-    val tools = Tools(cfg, db, store, embeddings)
+    val embeddings = Embeddings(cfg, metrics)
+    val audit = Audit(cfg, db, metrics).apply { start() }
+    val tools = Tools(cfg, db, store, embeddings, audit, metrics)
     val chat = Chat(cfg, Gemini(cfg), tools)
+    val admin = Admin(cfg, Observability(cfg), audit)
 
     val auth = if (cfg.authEnabled) {
         log.info("auth ON — issuer {}, JWKS {}, audience {}",
@@ -48,17 +63,32 @@ fun main() {
         null
     }
 
-    val library = Library(cfg, db, store, embeddings)
-    val server = Http(cfg, chat, tools, db, library, store, auth).start()
+    if (cfg.logsEnabled || cfg.metricsQueryEnabled) {
+        log.info("admin observability — logs {}, metrics {}",
+            cfg.lokiUrl.ifBlank { "(off)" }, cfg.prometheusUrl.ifBlank { "(off)" })
+    } else {
+        log.info("admin observability is off — LOKI_URL and PROMETHEUS_URL are both unset, " +
+            "so the Admin tab offers the audit trail only. Start the stack with " +
+            "`docker compose --profile observe up -d` for the rest.")
+    }
+
+    val library = Library(cfg, db, store, embeddings, metrics)
+    val server = Http(cfg, chat, tools, db, library, store, auth, audit, metrics, admin).start()
     library.start()
 
     // Drain in dependency order on SIGTERM: stop accepting, let in-flight chat
     // turns finish (a turn holds its connection for as long as the model takes
     // to answer, so "in flight" routinely means a user watching a half-written
     // reply), and only then close what those turns are using.
+    //
+    // The audit writer drains BEFORE the pool it writes through is closed —
+    // getting that order wrong would throw away the records of whatever the
+    // service was doing when it was asked to stop, which is exactly the moment
+    // an audit trail is most likely to be read.
     Runtime.getRuntime().addShutdownHook(Thread({
         log.info("shutting down — draining for up to 20s")
         runCatching { server.stop(20) }
+        runCatching { audit.close() }
         runCatching { store.close() }
         runCatching { db.close() }
         log.info("shutdown complete")

@@ -606,11 +606,12 @@ td code, th code { background: none; padding: 0; }
   <div class="rnum">2</div>
   <div class="rhead">
     <p class="eyebrow">LEVEL TWO · INSIDE THE SYSTEM</p>
-    <h2>Five containers, one published port</h2>
+    <h2>Nine containers, one published port</h2>
     <p class="lede">
       The exposure is the design. Only <code>ui</code> publishes anything, and
-      it publishes to loopback; Postgres and Qdrant are reachable on the compose
-      network and nowhere else.
+      it publishes to loopback; every other service — the two stores and the
+      whole observability half — is reachable on the compose network and
+      nowhere else.
     </p>
   </div>
 
@@ -641,7 +642,7 @@ td code, th code { background: none; padding: 0; }
 
   <figure>
     <div class="scroll w-lg">
-      <svg viewBox="0 0 1180 690" role="img" aria-label="Container diagram: a browser reaches the ui container, which reverse-proxies the gateway and Keycloak; the gateway talks to Postgres, Qdrant, Keycloak, the Gemini API and the mounted library folder.">
+      <svg viewBox="0 0 1180 900" role="img" aria-label="Container diagram: a browser reaches the ui container, which reverse-proxies the gateway and Keycloak; the gateway talks to Postgres, Qdrant, Keycloak, the Gemini API and the mounted library folder, and queries Loki and Prometheus for the administrator’s view; Alloy tails every container into Loki and cAdvisor feeds Prometheus.">
 
         <!-- browser -->
         <rect class="bxo" x="60" y="24" width="260" height="64" rx="2"/>
@@ -649,7 +650,7 @@ td code, th code { background: none; padding: 0; }
         <text class="ts" x="76" y="70">React · Redux Toolkit · keycloak-js</text>
 
         <!-- compose boundary -->
-        <rect class="bnd" x="30" y="140" width="830" height="500" rx="3"/>
+        <rect class="bnd" x="30" y="140" width="830" height="730" rx="3"/>
         <text class="tg" x="46" y="162">DOCKER COMPOSE PROJECT “SESHAT” · ONE INTERNAL NETWORK</text>
 
         <!-- ui -->
@@ -743,6 +744,54 @@ td code, th code { background: none; padding: 0; }
         <text class="tg" x="405" y="546" text-anchor="middle">NO</text>
         <text class="tg" x="405" y="580" text-anchor="middle">PUBLISHED</text>
         <text class="tg" x="405" y="594" text-anchor="middle">PORTS</text>
+
+        <!-- ── observability ────────────────────────────────────────────
+             Added as a band rather than a second diagram: these four are
+             part of the same compose project and the same "publishes
+             nothing" rule, and drawing them elsewhere would imply a
+             separation that does not exist. -->
+        <rect class="bnd" x="52" y="644" width="680" height="196" rx="3"/>
+        <text class="tg" x="66" y="668">OBSERVABILITY · THE ADMIN TAB’S SUPPLY · NOTHING PUBLISHED</text>
+
+        <rect class="bx" x="70" y="690" width="160" height="96" rx="2"/>
+        <text class="tt" x="84" y="716">alloy</text>
+        <text class="ts" x="84" y="736">grafana/alloy</text>
+        <text class="ts" x="84" y="752">tails every container</text>
+        <text class="ts" x="84" y="768">over the Docker socket</text>
+
+        <rect class="bx" x="248" y="690" width="160" height="96" rx="2"/>
+        <text class="tt" x="262" y="716">loki</text>
+        <text class="ts" x="262" y="736">grafana/loki</text>
+        <text class="ts" x="262" y="752">labels: service, level</text>
+        <text class="ts" x="262" y="768">the rest is metadata</text>
+
+        <rect class="bx" x="426" y="690" width="160" height="96" rx="2"/>
+        <text class="tt" x="440" y="716">prometheus</text>
+        <text class="ts" x="440" y="736">prom/prometheus</text>
+        <text class="ts" x="440" y="752">scrapes seven targets</text>
+        <text class="ts" x="440" y="768">across the stack</text>
+
+        <rect class="bx" x="604" y="690" width="116" height="96" rx="2"/>
+        <text class="tt" x="618" y="716">cadvisor</text>
+        <text class="ts" x="618" y="736">per-container</text>
+        <text class="ts" x="618" y="752">CPU, memory,</text>
+        <text class="ts" x="618" y="768">net and disk</text>
+
+        <!-- alloy -> loki -->
+        <path class="ln" d="M 230 738 L 242 738"/>
+        <!-- cadvisor -> prometheus -->
+        <path class="ln" d="M 600 738 L 592 738"/>
+
+        <!-- gateway queries loki and prometheus for the Admin tab. Routed
+             down the right lane at x=760: clear of the library mount arrow,
+             which turns at x=780 above y=485. -->
+        <path class="ln" d="M 700 436 L 760 436 L 760 762 L 736 762"/>
+        <text class="tl" x="772" y="560">the admin API</text>
+        <text class="ti" x="772" y="576">queries both —</text>
+        <text class="ti" x="772" y="592">LogQL, PromQL,</text>
+        <text class="ti" x="772" y="608">after a role check</text>
+
+        <text class="tg" x="66" y="812">EVERY CONTAINER LOGS JSON · ALLOY NORMALISES NINE SHAPES INTO ONE</text>
       </svg>
     </div>
     <div class="legend">
@@ -757,7 +806,12 @@ td code, th code { background: none; padding: 0; }
       same-origin in development and production alike, and what lets an outer
       proxy forward exactly one path. The bind on the published port is
       <code>127.0.0.1</code> by default, so on a server the stack cannot be
-      reached beside nginx, skipping TLS.
+      reached beside nginx, skipping TLS. The observability band is inside the
+      same boundary and inside the same rule: the browser never reaches Loki or
+      Prometheus, only the gateway’s admin API, which checks a Keycloak role
+      first. Two of those containers hold real privilege —
+      <code>alloy</code> reads the Docker socket, <code>cadvisor</code> runs
+      privileged — which is why they are drawn rather than assumed.
     </figcaption>
   </figure>
 </section>
@@ -771,7 +825,7 @@ td code, th code { background: none; padding: 0; }
     <p class="eyebrow">LEVEL THREE · INSIDE THE CONTAINERS</p>
     <h2>One definition, two callers</h2>
     <p class="lede">
-      The gateway's fifteen Kotlin files arrange into two paths that meet at a
+      The gateway's nineteen Kotlin files arrange into two paths that meet at a
       shared foundation: answering a question, and indexing a document. Both
       reach the same four components, and ask them opposite things.
     </p>
@@ -824,7 +878,7 @@ td code, th code { background: none; padding: 0; }
         <rect class="bx" x="56" y="78" width="520" height="60" rx="2"/>
         <text class="tt" x="72" y="102">Http.kt</text>
         <text class="ts" x="72" y="120">JDK HttpServer · one virtual thread per request · SSE writer</text>
-        <text class="ts" x="72" y="134">CORS · readiness probe · a 401 before anything else runs</text>
+        <text class="ts" x="72" y="134">bounded bodies · readiness probe · a 401 before anything runs</text>
 
         <!-- Auth -->
         <rect class="bx" x="676" y="78" width="210" height="60" rx="2"/>
@@ -854,7 +908,7 @@ td code, th code { background: none; padding: 0; }
         <!-- Library -->
         <rect class="bx" x="676" y="182" width="210" height="64" rx="2"/>
         <text class="tt" x="692" y="206">Library.kt</text>
-        <text class="ts" x="692" y="224">scan every minute · sha-256</text>
+        <text class="ts" x="692" y="224">scan every minute · stat, then sha-256</text>
         <text class="ts" x="692" y="238">+ chunker stamp · uploads</text>
         <path class="ln" d="M 760 138 L 760 176"/>
         <text class="tl" x="770" y="154">POST</text>
@@ -1035,8 +1089,8 @@ td code, th code { background: none; padding: 0; }
         <text class="tl" x="628" y="331" text-anchor="middle">the thread</text>
 
         <path class="ln-f" d="M 360 335 L 246 335"/>
-        <text class="tl" x="303" y="319" text-anchor="middle">persisted on</text>
-        <text class="tl" x="303" y="331" text-anchor="middle">every change</text>
+        <text class="tl" x="303" y="319" text-anchor="middle">coalesced 250ms</text>
+        <text class="tl" x="303" y="331" text-anchor="middle">flush on pagehide</text>
 
         <path class="ln-f" d="M 400 304 L 400 264 L 135 264 L 135 240"/>
         <text class="tl" x="270" y="256" text-anchor="middle">re-renders the transcript and the sources panel</text>
@@ -1051,9 +1105,17 @@ td code, th code { background: none; padding: 0; }
       text turns without the tool traffic that produced them — the model needs
       what was said, and replaying tool calls would mean replaying thought
       signatures that are only valid inside the request that produced them.
+      The gateway does not take that window on trust: it caps what it will
+      replay at forty messages and 200,000 characters whatever the caller sent,
+      because the browser owning the history means the history arrives as input.
       The stream is read with <code>fetch</code> and a stream reader rather
       than <code>EventSource</code>, which is GET-only and reconnects by
       itself; this needs a POST body and a turn that ends when it ends.
+      The transcript reaching <code>localStorage</code> is coalesced at 250ms
+      rather than written on every change, with a flush on <code>pagehide</code>
+      so the tail of an answer is never the part that is lost: a streamed answer
+      changes the store on every token, and the structure being serialised grows
+      with each one.
       <code>Uploader</code> is the one component that does not touch this
       machinery at all: it holds its own queue in a ref, sends one plain
       <code>fetch</code> per file, and keeps nothing — a list of what happened
@@ -1130,8 +1192,8 @@ td code, th code { background: none; padding: 0; }
 
         <!-- 2 self -->
         <path class="ln" d="M 280 146 L 330 146 L 330 166 L 286 166"/>
-        <text class="tl" x="338" y="150">Auth.verify — RS256, iss,</text>
-        <text class="ti" x="338" y="164">aud, exp, role use-ui</text>
+        <text class="tl" x="338" y="150">Auth.verify — RS256, iss, aud, exp, role use-ui</text>
+        <text class="ti" x="338" y="164">then history trimmed — 40 messages, 200k chars</text>
 
         <!-- 3 -->
         <text class="tl" x="375" y="190" text-anchor="middle">run(prompt, history, sse)</text>
@@ -1226,14 +1288,15 @@ td code, th code { background: none; padding: 0; }
       or written there by <code>POST /upload</code> — and the same path below
       indexes it. The difference is only when: an upload runs it inside the
       request, while a file copied in waits for the next tick, one minute at
-      most. That cadence is affordable because an unchanged corpus costs a read
-      and a hash and nothing else.
+      most. That cadence is affordable because an unchanged corpus costs one
+      stat per file and nothing else — not a read, not a hash, and no call to
+      the embedding API.
     </p>
   </div>
 
   <figure>
     <div class="scroll w-tall">
-      <svg viewBox="0 0 1000 880" role="img" aria-label="Ingestion flow: the scanner walks the library folder, filters by extension, skips unchanged files by hash, rejects anything that is not strict UTF-8, chunks the rest, writes Postgres first and then embeds and upserts into Qdrant.">
+      <svg viewBox="0 0 1000 962" role="img" aria-label="Ingestion flow: the scanner walks the library folder, filters by extension, skips unchanged files first on size and mtime and then on hash, rejects anything that is not strict UTF-8, chunks the rest, writes Postgres first and then embeds and upserts into Qdrant.">
 
         <!-- main spine -->
         <rect class="bx2" x="140" y="30" width="300" height="56" rx="2"/>
@@ -1262,80 +1325,91 @@ td code, th code { background: none; padding: 0; }
         <path class="ln-f" d="M 290 168 L 290 192"/>
 
         <rect class="bx" x="140" y="194" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="218">same sha-256 AND same chunker?</text>
-        <text class="ts" x="156" y="238">the registry the scanner diffs against</text>
+        <text class="tn" x="156" y="218">size, mtime AND chunker all match?</text>
+        <text class="ts" x="156" y="238">the fast path — the file is not opened</text>
         <path class="ln-t" d="M 440 222 L 514 222"/>
         <text class="ti" x="477" y="214" text-anchor="middle">yes</text>
         <rect class="bxo" x="520" y="200" width="380" height="44" rx="2"/>
-        <text class="ts" x="534" y="218">unchanged — a read and a hash. No writes, no</text>
-        <text class="ts" x="534" y="234">embedding call. This is why a poll suffices.</text>
+        <text class="ts" x="534" y="218">unchanged, for the cost of one stat. No read, no</text>
+        <text class="ts" x="534" y="234">hash, no embedding call. This is why a poll suffices.</text>
 
         <path class="ln-f" d="M 290 250 L 290 274"/>
 
         <rect class="bx" x="140" y="276" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="300">NUL check, then strict UTF-8</text>
-        <text class="ts" x="156" y="320">malformed input REPORTs, never substitutes</text>
+        <text class="tn" x="156" y="300">same sha-256 AND same chunker?</text>
+        <text class="ts" x="156" y="320">the registry the scanner diffs against</text>
         <path class="ln-t" d="M 440 304 L 514 304"/>
-        <text class="ti" x="477" y="296" text-anchor="middle">fails</text>
+        <text class="ti" x="477" y="296" text-anchor="middle">yes</text>
         <rect class="bxo" x="520" y="282" width="380" height="44" rx="2"/>
-        <text class="ts" x="534" y="300">not text — skipped. A PDF renamed .txt passes</text>
-        <text class="ts" x="534" y="316">the extension test; this is the one that catches it.</text>
+        <text class="ts" x="534" y="300">unchanged after all — a touched file, or a row</text>
+        <text class="ts" x="534" y="316">written before mtime was. The stat is written back.</text>
 
         <path class="ln-f" d="M 290 332 L 290 356"/>
 
         <rect class="bx" x="140" y="358" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="382">Semantic chunking — cosine bunching</text>
-        <text class="ts" x="156" y="402">min 200 chars · max 3000 · threshold 0.75</text>
-
-        <path class="hair" d="M 440 386 L 514 386"/>
-        <rect class="bx2" x="520" y="352" width="380" height="106" rx="2"/>
-        <text class="tg" x="534" y="374">TWO EMBEDDING PASSES, ON PURPOSE</text>
-        <text class="ts" x="534" y="396">Every sentence is embedded to find the boundaries,</text>
-        <text class="ts" x="534" y="412">then every finished chunk is embedded to be stored.</text>
-        <text class="ts" x="534" y="428">You cannot know where the meaning turns without</text>
-        <text class="ts" x="534" y="444">having embedded both sides of the turn.</text>
+        <text class="tn" x="156" y="382">NUL check, then strict UTF-8</text>
+        <text class="ts" x="156" y="402">malformed input REPORTs, never substitutes</text>
+        <path class="ln-t" d="M 440 386 L 514 386"/>
+        <text class="ti" x="477" y="378" text-anchor="middle">fails</text>
+        <rect class="bxo" x="520" y="364" width="380" height="44" rx="2"/>
+        <text class="ts" x="534" y="382">not text — skipped. A PDF renamed .txt passes</text>
+        <text class="ts" x="534" y="398">the extension test; this is the one that catches it.</text>
 
         <path class="ln-f" d="M 290 414 L 290 438"/>
 
         <rect class="bx" x="140" y="440" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="464">Postgres — replaceDocument</text>
-        <text class="ts" x="156" y="484">one transaction; it assigns the chunk ids</text>
+        <text class="tn" x="156" y="464">Semantic chunking — cosine bunching</text>
+        <text class="ts" x="156" y="484">min 200 chars · max 3000 · threshold 0.75</text>
+
+        <path class="hair" d="M 440 468 L 514 468"/>
+        <rect class="bx2" x="520" y="434" width="380" height="106" rx="2"/>
+        <text class="tg" x="534" y="456">TWO EMBEDDING PASSES, ON PURPOSE</text>
+        <text class="ts" x="534" y="478">Every sentence is embedded to find the boundaries,</text>
+        <text class="ts" x="534" y="494">then every finished chunk is embedded to be stored.</text>
+        <text class="ts" x="534" y="510">You cannot know where the meaning turns without</text>
+        <text class="ts" x="534" y="526">having embedded both sides of the turn.</text>
 
         <path class="ln-f" d="M 290 496 L 290 520"/>
 
         <rect class="bx" x="140" y="522" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="546">Qdrant — drop this document's</text>
-        <text class="tn" x="156" y="564">stale points</text>
+        <text class="tn" x="156" y="546">Postgres — replaceDocument</text>
+        <text class="ts" x="156" y="566">one transaction; it assigns the chunk ids</text>
 
         <path class="ln-f" d="M 290 578 L 290 602"/>
 
         <rect class="bx" x="140" y="604" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="628">Embed + score</text>
-        <text class="ts" x="156" y="648">Gemini batch of 32, L2 · BM25 tf ÷ avgdl</text>
+        <text class="tn" x="156" y="628">Qdrant — drop this document's</text>
+        <text class="tn" x="156" y="646">stale points</text>
 
         <path class="ln-f" d="M 290 660 L 290 684"/>
 
         <rect class="bx" x="140" y="686" width="300" height="56" rx="2"/>
-        <text class="tn" x="156" y="710">Qdrant — upsert, batch 256</text>
-        <text class="ts" x="156" y="730">point id = chunk.id, in both stores</text>
+        <text class="tn" x="156" y="710">Embed + score</text>
+        <text class="ts" x="156" y="730">Gemini batch of 32, L2 · BM25 tf ÷ avgdl</text>
+
+        <path class="ln-f" d="M 290 742 L 290 766"/>
+
+        <rect class="bx" x="140" y="768" width="300" height="56" rx="2"/>
+        <text class="tn" x="156" y="792">Qdrant — upsert, batch 256</text>
+        <text class="ts" x="156" y="812">point id = chunk.id, in both stores</text>
 
         <!-- the ordering annotation -->
-        <path class="hair" d="M 460 440 L 486 440 L 486 742 L 460 742"/>
-        <path class="hair" d="M 486 591 L 516 591"/>
-        <rect class="bx2" x="520" y="530" width="380" height="122" rx="2"/>
-        <text class="tg" x="534" y="552">WHY POSTGRES COMMITS FIRST</text>
-        <text class="ts" x="534" y="574">If embedding fails after that commit, the chunks</text>
-        <text class="ts" x="534" y="590">exist without vectors — recoverable, because the</text>
-        <text class="ts" x="534" y="606">text lives in exactly one place and POST /reindex</text>
-        <text class="ts" x="534" y="622">rebuilds them. The sha-256 is already committed,</text>
-        <text class="ts" x="534" y="638">so the next scan will not loop on the same file.</text>
+        <path class="hair" d="M 460 522 L 486 522 L 486 824 L 460 824"/>
+        <path class="hair" d="M 486 673 L 516 673"/>
+        <rect class="bx2" x="520" y="612" width="380" height="122" rx="2"/>
+        <text class="tg" x="534" y="634">WHY POSTGRES COMMITS FIRST</text>
+        <text class="ts" x="534" y="656">If embedding fails after that commit, the chunks</text>
+        <text class="ts" x="534" y="672">exist without vectors — recoverable, because the</text>
+        <text class="ts" x="534" y="688">text lives in exactly one place and POST /reindex</text>
+        <text class="ts" x="534" y="704">rebuilds them. The sha-256 is already committed,</text>
+        <text class="ts" x="534" y="720">so the next scan will not loop on the same file.</text>
 
         <!-- mirror branch -->
-        <path class="hair" d="M 140 786 L 900 786"/>
-        <text class="tg" x="140" y="812">LIBRARY_MIRROR = ON (THE DEFAULT) — THE FOLDER IS THE SOURCE OF TRUTH</text>
-        <text class="ts" x="140" y="834">A path registered in `document` that no file matched on this scan is removed — the document row, its</text>
-        <text class="ts" x="140" y="850">chunks (by cascade), and its points in Qdrant. Qdrant first: its points are keyed by document_id, and</text>
-        <text class="ts" x="140" y="866">would be unreachable orphans if the row went first and the vector delete then failed.</text>
+        <path class="hair" d="M 140 868 L 900 868"/>
+        <text class="tg" x="140" y="894">LIBRARY_MIRROR = ON (THE DEFAULT) — THE FOLDER IS THE SOURCE OF TRUTH</text>
+        <text class="ts" x="140" y="916">A path registered in `document` that no file matched on this scan is removed — the document row, its</text>
+        <text class="ts" x="140" y="932">chunks (by cascade), and its points in Qdrant. Qdrant first: its points are keyed by document_id, and</text>
+        <text class="ts" x="140" y="948">would be unreachable orphans if the row went first and the vector delete then failed.</text>
       </svg>
     </div>
     <div class="legend">
@@ -1348,9 +1422,18 @@ td code, th code { background: none; padding: 0; }
       spine on the next tick and has to pass the two tests first. The extension
       allowlist is the cheap one and the strict decode is the one that matters:
       without it a mislabelled binary is indexed as kilobytes of mojibake that
-      pollutes every subsequent search. Note what the hash test compares now —
+      pollutes every subsequent search. Note what the hash test compares —
       the bytes AND the chunker signature, so changing <code>CHUNK_MIN_CHARS</code>
-      re-chunks a corpus whose files nobody touched. The average chunk length
+      re-chunks a corpus whose files nobody touched. Note too that the hash is
+      now the <em>second</em> test rather than the first: a minute-by-minute poll
+      that reads and hashes every byte of the corpus to discover that nothing
+      changed is most of what the poll used to cost, so an unchanged file is
+      settled by its size and mtime and never opened. That is the trade
+      <code>make</code> and <code>rsync</code> make, and it has the same edge — a
+      file edited so that both its size and its mtime are unchanged is missed.
+      It takes deliberate effort to arrange, and <code>POST /reindex</code>
+      passes <code>trustStat=false</code> to re-hash the corpus regardless, so
+      the repair path is never the one doing the guessing. The average chunk length
       that BM25 normalises against is computed once per scan rather than once
       per document, so a document's length normalisation does not depend on how
       many files happened to be processed before it.
@@ -1443,6 +1526,11 @@ td code, th code { background: none; padding: 0; }
         <tr><td><code>/upload</code></td><td>POST</td><td>admin, unless <code>UPLOAD_ADMIN_ONLY=off</code></td><td>One file of any format: <code>?name=</code> plus the bytes as the body. Anything that is not already text goes through Tika and is stored as <code>&lt;name&gt;.txt</code>; then it is chunked, embedded and indexed inside the request, so the response carries the chunk count and what it was converted from. A name that exists is replaced.</td></tr>
         <tr><td><code>/reindex</code></td><td>POST</td><td>admin</td><td>A full folder pass — index what is new, unindex what is gone — and then re-embed every chunk from Postgres. Returns <code>202</code> and runs in the background.</td></tr>
         <tr><td><code>/health</code></td><td>GET</td><td>none</td><td><code>200</code> only after a real round trip to both stores has succeeded.</td></tr>
+        <tr><td><code>/metrics</code></td><td>GET</td><td>none</td><td>Prometheus exposition — requests, chat turns, tool calls, embedding outcomes, the audit queue, and the JVM. Unauthenticated because Prometheus holds no token; the control is reachability, and <code>ui/nginx.conf</code> returns <code>404</code> for this path so the published proxy cannot be a way in.</td></tr>
+        <tr><td><code>/admin/logs</code></td><td>GET</td><td>admin or admin-observability</td><td>Every container's logs, from Loki. Takes severity, who, when, where and a search; the LogQL is built here, never sent by the browser. <code>/logs/tail</code> is the same filter as SSE, <code>/logs.csv</code> the same filter as a download, <code>/logs/facets</code> the values the dropdowns offer.</td></tr>
+        <tr><td><code>/admin/audit</code></td><td>GET</td><td>admin or admin-observability</td><td>The audit trail, same four filter dimensions, paged on <code>(at, id)</code> together so two rows written in one millisecond neither repeat nor vanish. <code>/audit.csv</code> walks the cursor rather than stopping at a page.</td></tr>
+        <tr><td><code>/admin/metrics</code></td><td>GET</td><td>admin or admin-observability</td><td>One named panel over Prometheus. The browser asks by name from <code>/admin/metrics/panels</code> and never composes PromQL.</td></tr>
+        <tr><td><code>/admin/services</code></td><td>GET</td><td>admin or admin-observability</td><td>Which scrape targets Prometheus reached on its last pass.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1492,13 +1580,15 @@ td code, th code { background: none; padding: 0; }
       </thead>
       <tbody>
         <tr><td><code>PUBLIC_URL</code></td><td><code>http://localhost:8800</code></td><td>The origin the <em>browser</em> uses. It becomes the token issuer, so it must match exactly or every token is rejected.</td></tr>
-        <tr><td><code>EMBED_DIMS</code></td><td class="num-col">768</td><td>Index-breaking. Changing it means stored vectors no longer match query vectors, silently — drop the Qdrant volume and re-index.</td></tr>
+        <tr><td><code>CORS_ORIGIN</code></td><td>—</td><td>Blank, and no CORS headers are sent at all. The application is same-origin in both modes — nginx proxies <code>/seshat/api</code> in production and the Vite dev server proxies the identical path — so no browser was ever asking for them. Set a specific origin only if you front the gateway some other way.</td></tr>
+        <tr><td><code>EMBED_DIMS</code></td><td class="num-col">768</td><td>Index-breaking, and a collection's width cannot be changed in place. The gateway reads the width of the collection it finds at boot and refuses to start against one that disagrees, naming the width it found — because the alternative was accepting the setting and then failing on every upsert, for ever, a long way from the cause. Drop the Qdrant volume and re-index.</td></tr>
+        <tr><td><code>EMBED_CONCURRENCY</code></td><td class="num-col">4</td><td>How many embedding batches are in flight at once while indexing. Four suits a free-tier key, where more earns 429s and the retry backoff makes the whole pass slower than not having sent them; raise it on a paid key.</td></tr>
         <tr><td><code>LIBRARY_MIRROR</code></td><td><code>on</code></td><td>On, the folder is the source of truth and deletions propagate. Off, documents accumulate and are only ever updated — and a reindex does not prune either.</td></tr>
         <tr><td><code>LIBRARY_UID</code> · <code>LIBRARY_GID</code></td><td class="num-col">1000</td><td>The gateway drops to this uid:gid, because it now writes uploaded documents into a folder on your disk. As root it would leave every one of them owned by root. Set it to whatever owns the library folder.</td></tr>
         <tr><td><code>LIBRARY_SCAN_MINUTES</code></td><td class="num-col">1</td><td>How often the folder is diffed against the index — how long a file copied in by hand waits, and how long a deleted one stays searchable. An upload through the UI is indexed in the request and waits for nothing.</td></tr>
         <tr><td><code>UPLOAD_MAX_MB</code></td><td class="num-col">25</td><td>Per uploaded file. nginx's <code>client_max_body_size</code> must be at or above it, or its HTML 413 reaches the UI instead of the gateway's JSON.</td></tr>
         <tr><td><code>UPLOAD_ADMIN_ONLY</code></td><td><code>on</code></td><td>The library is one shared corpus, so adding to it is an admin act by default. Off lets every <code>use-ui</code> account upload.</td></tr>
-        <tr><td><code>CHUNK_MIN_CHARS</code></td><td class="num-col">200</td><td>The floor a semantic bunch may not be under: below it the next sentence joins whatever the cosine says. Changing it re-chunks (and re-embeds) the whole corpus on the next scan, because each document records the chunker it was built with.</td></tr>
+        <tr><td><code>CHUNK_MIN_CHARS</code></td><td class="num-col">200</td><td>The floor a chunk may not be under: below it the next sentence joins whatever the cosine says. It governs <em>both</em> chunkers — the paragraph fallback used to carry its own constant, so the setting the brief names did nothing precisely when nobody was looking. Changing it re-chunks (and re-embeds) the whole corpus on the next scan, because each document records the chunker it was built with.</td></tr>
         <tr><td><code>CHUNK_MAX_CHARS</code></td><td class="num-col">3000</td><td>The ceiling. A glossary is similar to itself all the way down and must still be cut somewhere.</td></tr>
         <tr><td><code>SEMANTIC_THRESHOLD</code></td><td class="num-col">0.75</td><td>Cosine between the next sentence and the running centroid of the bunch. Higher cuts more often.</td></tr>
         <tr><td><code>SEMANTIC_CHUNKING</code></td><td><code>on</code></td><td>Off falls back to the paragraph rule — which is also what runs if the embedding API is unreachable mid-scan.</td></tr>
@@ -1506,6 +1596,13 @@ td code, th code { background: none; padding: 0; }
         <tr><td><code>KEYCLOAK_ISSUER</code></td><td>—</td><td>Blank turns auth off entirely and every caller becomes an anonymous admin. Compose always sets it.</td></tr>
         <tr><td><code>MAX_TOOL_ROUNDS</code></td><td class="num-col">8</td><td>How many rounds of tool calls a turn may take before it gives up and says so.</td></tr>
         <tr><td><code>BIND_ADDR</code></td><td><code>127.0.0.1</code></td><td>Loopback by default, so on a server the stack cannot be reached beside nginx, bypassing TLS.</td></tr>
+        <tr><td><code>AUDIT_CHAT_PROMPTS</code></td><td><code>off</code></td><td>The one setting here that changes what the system promises the people using it. <code>/chat</code> writes no transcript server-side — the browser owns the history — so the <em>turn</em> is always audited (who, when, how long, which searches it ran) while the <em>prompt</em> is kept as a sha-256 prefix and a length. On records the questions verbatim, readable by every administrator. Tell them.</td></tr>
+        <tr><td><code>AUDIT_READS</code></td><td><code>off</code></td><td><code>GET /config</code> is polled once a minute per open tab. On, that is a row per user per minute for ever, burying every row that means something.</td></tr>
+        <tr><td><code>AUDIT_BLOCKING</code></td><td><code>off</code></td><td>Off, a full audit queue drops records, counts them in <code>seshat_audit_dropped_total</code> and says so — a gap that is visible rather than silent. On, the queue back-pressures instead: slower under load, and complete.</td></tr>
+        <tr><td><code>AUDIT_RETENTION_DAYS</code></td><td class="num-col">90</td><td>A daily sweep. <code>LOG_RETENTION_DAYS</code> (14) and <code>METRICS_RETENTION_DAYS</code> (15) are Loki's and Prometheus'.</td></tr>
+        <tr><td><code>LOKI_URL</code> · <code>PROMETHEUS_URL</code></td><td>service names</td><td>Blank either one and the gateway reports that half of the Admin tab as unavailable in <code>/config</code>, and the UI hides the panel — rather than rendering a tab that only ever 503s. The URLs come from configuration alone: nothing in a request selects a host, which is the difference between a log proxy and an SSRF endpoint wearing an admin badge.</td></tr>
+        <tr><td><code>LOG_FORMAT</code></td><td><code>json</code></td><td>Every container emits JSON so the pipeline ships fields rather than a regex's guess at them. <code>text</code> restores readable lines and is the default for a bare <code>java -jar</code>. Anything else makes the gateway refuse to start — <code>logback.xml</code> names its appenders after the values this takes, so an unrecognised one would leave the root logger with no appender and the service running silently.</td></tr>
+        <tr><td><code>SEED_ADMIN_PASSWORD</code></td><td>—</td><td>Substituted into the realm file at import. Unset, the placeholder resolves to <code>change-me</code> — useless on purpose, because an unset <code>${VAR}</code> would otherwise be left in place as its own literal text. Quote a value containing a <code>$</code>: compose interpolates <code>.env</code>.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1581,8 +1678,8 @@ td code, th code { background: none; padding: 0; }
 
 <footer class="wrap">
   <div class="colophon">
-    Drawn from the source at <code>seshat@d943d56</code> — <code>docker-compose.yml</code>,
-    the fourteen Kotlin files under <code>gateway/src/main/kotlin</code>, the
+    Drawn from the source at <code>seshat@c46845e</code> — <code>docker-compose.yml</code>,
+    the nineteen Kotlin files under <code>gateway/src/main/kotlin</code>, the
     single-page application under <code>ui/src</code>, and
     <code>ui/nginx.conf</code>. Palette, typefaces and the rule that governs
     them are the project's own, taken from <code>ui/src/index.css</code>:

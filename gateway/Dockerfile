@@ -32,4 +32,18 @@ EXPOSE 8090
 # Container-aware heap sizing: the JVM reads the cgroup limit, so a memory cap
 # set in compose is actually honoured instead of the JVM sizing against the
 # host's total RAM.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/gateway.jar"]
+# The two --flags silence a dozen lines of JVM warning that grpc-netty's shaded
+# internals trigger at startup: one about sun.misc.Unsafe, one about
+# System::loadLibrary for the native transport. Both are written to stderr by
+# the JVM ITSELF, before any logger exists, so they cannot be JSON — and a dozen
+# unstructured records are otherwise the first thing an administrator sees in
+# the log view, ahead of the service's own first words.
+#
+# Neither changes behaviour. The access is already happening and is Netty's to
+# fix; these only stop the JVM narrating it. Both become no-ops (or need
+# revisiting) whenever the grpc/netty pins in build.gradle.kts move.
+ENTRYPOINT ["java", \
+  "-XX:MaxRAMPercentage=75", \
+  "--sun-misc-unsafe-memory-access=allow", \
+  "--enable-native-access=ALL-UNNAMED", \
+  "-jar", "/app/gateway.jar"]

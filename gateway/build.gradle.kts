@@ -44,6 +44,30 @@ dependencies {
 
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-classic:1.5.18")
+    // Structured logs. Every container in the stack emits JSON on stdout so
+    // Alloy can ship fields rather than a regex's guess at them — see
+    // logback.xml, which keeps a human-readable mode for a bare `java -jar`.
+    // Logback 1.5 ships its own JsonEncoder, but it nests the MDC and the
+    // throwable under structures that then need unwrapping downstream; this one
+    // puts MDC entries at the top level, which is what the pipeline reads.
+    implementation("net.logstash.logback:logstash-logback-encoder:9.0")
+
+    // Tika logs through the Log4j API. With no provider on the classpath it
+    // prints "Log4j API could not find a logging provider" to stderr on the
+    // first upload — one unstructured line in the middle of an otherwise
+    // structured stream, and every subsequent Tika message silently discarded.
+    // This routes them into slf4j, and therefore into the same JSON.
+    implementation("org.apache.logging.log4j:log4j-to-slf4j:2.24.3")
+
+    // Prometheus. The exposition format has more edge cases than it looks
+    // (escaping, _total suffixes, the OpenMetrics variant), and the JVM
+    // instrumentation is heap, GC, threads and class loading for free —
+    // all of which would otherwise be hand-written against ManagementFactory.
+    // `textformats` rather than the full `exposition-formats`: the latter drags
+    // in protobuf support this scrape never negotiates.
+    implementation("io.prometheus:prometheus-metrics-core:1.8.0")
+    implementation("io.prometheus:prometheus-metrics-exposition-textformats:1.8.0")
+    implementation("io.prometheus:prometheus-metrics-instrumentation-jvm:1.8.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")

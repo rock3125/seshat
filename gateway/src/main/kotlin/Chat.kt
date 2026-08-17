@@ -27,7 +27,17 @@ class Chat(private val cfg: Config, private val gemini: Gemini, private val tool
     /** One prior turn, replayed to give the model the thread's context. */
     data class Message(val role: String, val content: String)
 
-    fun run(prompt: String, history: List<Message>, sse: Sse) {
+    /** What a turn did, for the audit row and the metrics — the answer itself
+     *  has already gone to the browser by the time this is returned. */
+    data class Outcome(val toolCalls: Int, val rounds: Int, val answerChars: Int)
+
+    fun run(
+        prompt: String,
+        history: List<Message>,
+        sse: Sse,
+        who: Principal? = null,
+        requestId: String = "",
+    ): Outcome {
         val conversation = gemini.conversation(
             Gemini.declarations(tools.list()), cfg.systemPrompt)
 
@@ -46,8 +56,11 @@ class Chat(private val cfg: Config, private val gemini: Gemini, private val tool
         conversation.addUser(prompt)
 
         var round = 0
+        var toolCalls = 0
+        var answerChars = 0
         while (true) {
             val turn = conversation.stream { delta ->
+                answerChars += delta.length
                 sse.send("token", JSONObject().put("text", delta))
             }
 
@@ -72,7 +85,8 @@ class Chat(private val cfg: Config, private val gemini: Gemini, private val tool
 
             val results = turn.calls.map { call ->
                 sse.send("tool_call", JSONObject().put("name", call.name).put("args", call.args))
-                val outcome = tools.call(call.name, call.args)
+                toolCalls++
+                val outcome = tools.call(call.name, call.args, who, requestId)
                 val ok = !outcome.optBoolean("isError", false)
                 val text = textOf(outcome)
 
@@ -87,6 +101,7 @@ class Chat(private val cfg: Config, private val gemini: Gemini, private val tool
         }
 
         sse.send("done", JSONObject())
+        return Outcome(toolCalls, round, answerChars)
     }
 
     /** An MCP tool result is `{content:[{type,text}], isError}` — flatten the

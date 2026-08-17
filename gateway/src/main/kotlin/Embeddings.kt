@@ -35,7 +35,7 @@ import kotlin.math.sqrt
  *                meaning. Every vector is L2-normalised here, whatever the
  *                dimensionality, so the stored and query sides always agree.
  */
-class Embeddings(private val cfg: Config) {
+class Embeddings(private val cfg: Config, private val metrics: Metrics? = null) {
     private val log = LoggerFactory.getLogger("Embeddings")
     private val http: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(20))
@@ -151,11 +151,20 @@ class Embeddings(private val cfg: Config) {
         var last: Exception? = null
         repeat(5) { attempt ->
             try {
-                return call()
+                val out = call()
+                metrics?.embedCall("ok")
+                return out
             } catch (e: EmbedFailure) {
+                // Counted separately from other failures because it is the one
+                // that is a TUNING signal rather than a fault: a sustained rate
+                // of 429s means EMBED_CONCURRENCY is above what the key allows,
+                // and the backoff below is then making indexing slower than
+                // sending fewer requests would have been.
+                metrics?.embedCall(if (e.status == 429) "rate_limited" else "error")
                 if (e.status != 429 && e.status !in 500..599) throw e
                 last = e
             } catch (e: java.io.IOException) {
+                metrics?.embedCall("error")
                 last = e
             }
             log.warn("{} failed (attempt {}), retrying in {}ms: {}",

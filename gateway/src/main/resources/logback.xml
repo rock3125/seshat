@@ -1,9 +1,81 @@
 <configuration>
-  <!-- Plain lines on stdout: `docker compose logs` is the reader, and it wants
-       something a human can scan, not JSON. -->
-  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+  <!--
+    Logback's own startup commentary, silenced.
+
+    Without this, configuring the logger prints ~78 lines of `|-INFO in
+    ch.qos.logback...` to stdout BEFORE the first appender exists — so they are
+    not JSON, cannot be, and arrive in the Admin tab as seventy-eight
+    unstructured records that bury the service's actual first words. They say
+    nothing a reader of this file does not already know.
+  -->
+  <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+
+  <!--
+    Two encoders, one switch.
+
+    This file used to say: "Plain lines on stdout: `docker compose logs` is the
+    reader, and it wants something a human can scan, not JSON." That was right
+    while `docker compose logs` was the only reader. It no longer is — the
+    Admin tab is, and it wants fields, not a regex's guess at them. Every
+    service in the stack now emits JSON so the pipeline ships structure rather
+    than reconstructing it.
+
+    The human reader was not forgotten, it was given a switch. LOG_FORMAT=text
+    restores the old lines and is the DEFAULT here, so `./gradlew run` and a
+    bare `java -jar` stay readable; compose sets LOG_FORMAT=json. To read the
+    containerised logs at a terminal:
+
+      docker compose logs gateway | jq -r '"\(.ts) \(.level) \(.logger) \(.msg)"'
+
+    HOW THE SWITCH WORKS, and its one sharp edge: the appenders are NAMED for
+    the values LOG_FORMAT takes, and the root refers to one by substitution. A
+    value that is neither `json` nor `text` therefore names an appender that
+    does not exist, and logback prints "Could not find an appender named [...]"
+    on stderr and logs NOTHING. Main checks the value before touching a logger
+    and refuses to start on a bad one, which is the only reason this trick is
+    safe to use. Do not remove that check.
+  -->
+
+  <appender name="text" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{HH:mm:ss.SSS} %-5level %-12logger{0} %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="json" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <!--
+        The four fields the whole pipeline agrees on: ts, level, service, msg.
+        Every filter in the Admin tab depends on those and on nothing else, so a
+        service that cannot produce the rest still filters correctly.
+      -->
+      <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSXXX</timestampPattern>
+      <fieldNames>
+        <timestamp>ts</timestamp>
+        <message>msg</message>
+        <logger>logger</logger>
+        <thread>thread</thread>
+        <!-- level_value is level as an integer, and nothing here reads it;
+             @version is Logstash's schema marker and this is not Logstash. -->
+        <levelValue>[ignore]</levelValue>
+        <version>[ignore]</version>
+      </fieldNames>
+
+      <!-- Alloy labels the stream from the compose service name as well. This
+           is the line's own claim about who wrote it, which survives being
+           copied out of the pipeline into a paste or a bug report. -->
+      <customFields>{"service":"gateway"}</customFields>
+
+      <!--
+        MDC at the top level. This is the point of the whole change: Http.handle
+        puts `req` and `user` on the MDC for every request, so EVERY line any
+        route writes carries who caused it and which request it belonged to —
+        and `req` is the same id as the audit row's, which is what lets the
+        Admin tab show a failed action and its log lines together.
+      -->
+      <includeMdc>true</includeMdc>
+      <includeContext>false</includeContext>
+      <shortenedLoggerNameLength>24</shortenedLoggerNameLength>
     </encoder>
   </appender>
 
@@ -12,7 +84,7 @@
   <logger name="io.grpc" level="WARN"/>
   <logger name="com.zaxxer.hikari" level="WARN"/>
 
-  <root level="INFO">
-    <appender-ref ref="STDOUT"/>
+  <root level="${LOG_LEVEL:-INFO}">
+    <appender-ref ref="${LOG_FORMAT:-text}"/>
   </root>
 </configuration>

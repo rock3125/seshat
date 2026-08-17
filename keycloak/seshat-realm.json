@@ -11,6 +11,11 @@
   "rememberMe": true,
   "bruteForceProtected": true,
 
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+
   "roles": {
     "realm": [
       {
@@ -21,7 +26,17 @@
         "clientRole": false
       },
       { "name": "use-ui", "description": "May sign in to and use the Seshat chat UI" },
-      { "name": "admin", "description": "May re-index the corpus (POST /reindex)" }
+      {
+        "name": "admin-observability",
+        "description": "May read the audit trail, the consolidated container logs and the metrics panels in the Admin tab."
+      },
+      {
+        "name": "admin",
+        "description": "Administrator: may add documents to the library and re-index the corpus. Composite — carries use-ui and admin-observability, so one grant is the whole administrator.",
+        "composite": true,
+        "composites": { "realm": ["use-ui", "admin-observability"] },
+        "clientRole": false
+      }
     ]
   },
 
@@ -34,7 +49,12 @@
 
   "groups": [
     { "name": "readers", "path": "/readers", "realmRoles": ["use-ui"] },
-    { "name": "admins", "path": "/admins", "realmRoles": ["use-ui", "admin"] }
+    { "name": "admins", "path": "/admins", "realmRoles": ["use-ui", "admin"] },
+    {
+      "name": "auditors",
+      "path": "/auditors",
+      "realmRoles": ["use-ui", "admin-observability"]
+    }
   ],
 
   "users": [
@@ -45,7 +65,9 @@
       "firstName": "Rock",
       "lastName": "de Vocht",
       "email": "peter@peter.co.nz",
-      "credentials": [{ "type": "password", "value": "$DangerMouse", "temporary": false }],
+      "credentials": [
+        { "type": "password", "value": "${SEED_ADMIN_PASSWORD:change-me}", "temporary": false }
+      ],
       "groups": ["/admins"]
     },
     {
@@ -55,8 +77,10 @@
       "firstName": "Guest",
       "lastName": "User",
       "email": "info@seshat.com",
-      "credentials": [{ "type": "password", "value": "ChoDeisheequ7oLohSuo", "temporary": false }],
-      "groups": ["/admins"]
+      "credentials": [
+        { "type": "password", "value": "${SEED_GUEST_PASSWORD:change-me-too}", "temporary": false }
+      ],
+      "groups": ["/readers"]
     }
   ],
 

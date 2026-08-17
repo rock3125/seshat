@@ -55,6 +55,7 @@ function emptyUi(): UiState {
     railOpen: window.innerWidth > 960,
     drawerOpen: false,
     focusedChunk: null,
+    view: 'chat',
   }
 }
 

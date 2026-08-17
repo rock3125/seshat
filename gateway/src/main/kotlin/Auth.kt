@@ -12,9 +12,39 @@ import java.security.spec.RSAPublicKeySpec
 import java.time.Duration
 import java.util.Base64
 
-/** Who is calling, per a verified token. */
-data class Principal(val username: String, val name: String, val roles: Set<String>) {
-    val isAdmin get() = "admin" in roles
+/**
+ * Who is calling, per a verified token.
+ *
+ * [username] is what a reader recognises and [subject] is what survives a
+ * rename — the audit trail keeps both, because a row that says only "rock" is
+ * ambiguous the day someone changes their username, and a row that says only
+ * `f81d…` is unreadable.
+ *
+ * Capabilities are named, not spelled out at each call site. Two of them:
+ * [isAdmin] may change the corpus, [mayAudit] may read what everyone did. They
+ * come apart deliberately — `admin-observability` alone is an auditor who
+ * cannot re-index, which is an assignment in Keycloak rather than a change
+ * here.
+ */
+data class Principal(
+    val username: String,
+    val name: String,
+    val roles: Set<String>,
+    /** The token's `sub`: stable across a username change. */
+    val subject: String = "",
+    /** The token's `sid`: every action in one browser session shares it. */
+    val sessionId: String = "",
+) {
+    val isAdmin get() = ADMIN in roles
+
+    /** May read the audit trail, the consolidated logs and the metrics. */
+    val mayAudit get() = ADMIN in roles || OBSERVABILITY in roles
+
+    companion object {
+        const val ADMIN = "admin"
+        const val OBSERVABILITY = "admin-observability"
+        const val USE_UI = "use-ui"
+    }
 }
 
 /**
@@ -89,7 +119,17 @@ class Auth(
             ?: emptySet()
 
         val username = payload.optString("preferred_username").ifBlank { payload.optString("sub") }
-        return Principal(username, payload.optString("name").ifBlank { username }, roles)
+        return Principal(
+            username = username,
+            name = payload.optString("name").ifBlank { username },
+            roles = roles,
+            subject = payload.optString("sub"),
+            // `sid` is present on a token minted from a browser session and
+            // absent on one minted for a service account — so it is optional
+            // here, and an empty session id in the audit trail means exactly
+            // that rather than a bug.
+            sessionId = payload.optString("sid"),
+        )
     }
 
     /** `aud` is a string or an array of strings; `azp` (authorised party) is

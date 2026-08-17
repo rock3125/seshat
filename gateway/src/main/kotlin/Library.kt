@@ -40,6 +40,7 @@ class Library(
     private val db: Db,
     private val store: Store,
     private val embeddings: Embeddings,
+    private val metrics: Metrics? = null,
 ) {
     private val log = LoggerFactory.getLogger("Library")
 
