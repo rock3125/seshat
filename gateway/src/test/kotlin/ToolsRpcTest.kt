@@ -44,6 +44,13 @@ class ToolsRpcTest {
     private fun textOf(result: JSONObject): String =
         result.getJSONArray("content").getJSONObject(0).getString("text")
 
+    /** How many audit rows are waiting to be written. Read from the metrics,
+     *  which is where an operator reads it. */
+    private fun queueDepth(): Double =
+        String(metrics.scrape()).lines().map { it.trim() }
+            .first { it.startsWith("seshat_audit_queue_depth ") }
+            .substringAfterLast(' ').toDouble()
+
     // ---- the handshake ------------------------------------------------------
 
     @Test
@@ -118,21 +125,35 @@ class ToolsRpcTest {
     }
 
     @Test
-    fun `a KNOWN method sent without an id is still answered — a deviation`() {
-        // Documenting what this does, not endorsing it. JSON-RPC 2.0 says a
-        // request with no `id` is a notification and MUST NOT be replied to;
-        // only the unknown-method branch checks that here, so `ping`,
-        // `initialize`, `tools/list` and `tools/call` reply with `"id": null`.
-        //
-        // It has never bitten because no client sends any of those as a
-        // notification — there is nothing to gain by asking for the catalogue
-        // and declining to hear the answer. Left as it is rather than changed
-        // under cover of a test: making `ok()` return null when there is no id
-        // is the one-line fix, and it is a behaviour change, not test coverage.
-        val answered = rpc(request("ping", id = null))!!
+    fun `no method is answered without an id, not even a known one`() {
+        // The regression: every branch except unknown-method used to answer
+        // whatever it was sent, so `ping`, `initialize`, `tools/list` and
+        // `tools/call` all replied to a notification — a message on the wire
+        // that the client never asked for and cannot match to anything, which a
+        // strict one is entitled to close the connection over.
+        for (method in listOf("initialize", "ping", "tools/list", "tools/call")) {
+            assertNull(rpc(request(method, id = null)), "'$method' answered a notification")
+        }
+    }
 
-        assertTrue(answered.isNull("id"))
-        assertTrue(answered.getJSONObject("result").isEmpty)
+    @Test
+    fun `a notification still does the work — it just gets no answer`() {
+        // The other half of the rule, and the half a `return null` at the top of
+        // rpc() would have broken: a notification means "do this and do not
+        // reply", not "ignore this". The tool runs and its audit row is written;
+        // only the response is withheld.
+        val audited = Audit(cfg.copy(auditEnabled = true), db, metrics)
+        val tools = Tools(cfg, db, store, Embeddings(cfg), audited, metrics)
+
+        val answer = tools.rpc(JSONObject()
+            .put("jsonrpc", "2.0")
+            .put("method", "tools/call")
+            .put("params", JSONObject()
+                .put("name", "search")
+                .put("arguments", JSONObject().put("query", ""))))
+
+        assertNull(answer, "a notification was answered")
+        assertEquals(1.0, queueDepth(), "the tool call was not audited")
     }
 
     @Test
@@ -239,6 +260,7 @@ class ToolsRpcTest {
         val cfg: Config = Config.fromEnv().copy(geminiApiKey = "")
         val db = Db(cfg)
         val store = Store(cfg)
+        val metrics = Metrics(true)
         val tools = Tools(cfg, db, store, Embeddings(cfg))
 
         @AfterAll

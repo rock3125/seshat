@@ -285,8 +285,18 @@ class Tools(
         val id: Any? = if (hasId) msg.get("id") else null
         val params = msg.optJSONObject("params") ?: JSONObject()
 
-        fun ok(result: JSONObject) =
-            JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result)
+        // A message with no `id` is a NOTIFICATION, and JSON-RPC 2.0 is explicit
+        // that a notification gets no response — not an empty one, not one
+        // carrying a null id. The work still happens: `result` is computed by the
+        // caller of this and then dropped, so `tools/call` sent as a notification
+        // still runs the tool and still writes its audit row.
+        //
+        // This used to answer whatever it was sent, which put a reply on the wire
+        // that a strict client is entitled to close the connection over. Only the
+        // unknown-method branch below was checking.
+        fun ok(result: JSONObject): JSONObject? =
+            if (!hasId) null
+            else JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result)
 
         return try {
             when (method) {
