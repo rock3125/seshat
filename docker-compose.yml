@@ -134,6 +134,12 @@ services:
       # that forgetting is obvious rather than silent.
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-change-me}
       SEED_GUEST_PASSWORD: ${SEED_GUEST_PASSWORD:-change-me-too}
+      # Also passed INTO the container, not just interpolated into KC_HOSTNAME
+      # below: the realm file builds the client's redirect URIs from it, and a
+      # client whose redirect URIs do not include the real origin refuses the
+      # sign-in with "Invalid parameter: redirect_uri" AFTER the password has
+      # been accepted — which reads as a broken login, not a misconfiguration.
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8800}
       # Keycloak lives one level down from the app, at /seshat/auth, and the
       # two settings below do DIFFERENT jobs with the same value:
       #   KC_HTTP_RELATIVE_PATH  where the server routes requests internally

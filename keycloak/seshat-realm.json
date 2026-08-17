@@ -95,6 +95,7 @@
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "redirectUris": [
+        "${PUBLIC_URL:http://localhost:8800}/seshat/*",
         "http://localhost:8800/seshat/*",
         "http://127.0.0.1:8800/seshat/*",
         "http://localhost:5173/*"
@@ -102,7 +103,7 @@
       "webOrigins": ["+"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:8800/seshat/*##http://127.0.0.1:8800/seshat/*##http://localhost:5173/*"
+        "post.logout.redirect.uris": "${PUBLIC_URL:http://localhost:8800}/seshat/*##http://localhost:8800/seshat/*##http://127.0.0.1:8800/seshat/*##http://localhost:5173/*"
       },
       "protocolMappers": [
         {
